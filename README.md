@@ -1,2 +1,7 @@
+<div align="center">
+  
 # xdnmb-stat
-nmbxd status page
+</div>
+<p align="center">
+  <img src="sage.gif" alt="sage">
+</p>
