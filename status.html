@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>xdnmb status</title>
+<style>
+:root {
+  --bg: #F0EEE6;
+  --card: #FFFFFF;
+  --text: #191919;
+  --sub: #73726c;
+  --line: #E5E3DA;
+  --ok: #24A148;  --ok-bg: var(--ok);
+  --bad: #DA3633; --bad-bg: var(--bad);
+  --slow: #D9A511; --slow-bg: var(--slow);
+  --wait: #B8B6AE; --wait-bg: #8A8880;
+  --accent: #D97757;
+  --tick: #E9E7DF;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1F1E1B; --card: #262624; --text: #ECEAE4; --sub: #9C9A92;
+    --line: #38362F;
+    --ok: #3FB950; --bad: #F85149; --slow: #E3B341; --wait: #6E6C64;
+    --ok-bg: #238636; --bad-bg: #C93C37; --slow-bg: #B08800; --wait-bg: #57554E;
+    --tick: #33322C;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 15px/1.6 "Styrene B", "Styrene A", ui-sans-serif, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  max-width: 720px; margin: 0 auto; padding: 40px 20px 64px;
+}
+h1 { font-family: "Copernicus", "Tiempos Headline", Georgia, "Songti SC", serif; font-weight: 600; font-size: 24px; letter-spacing: .2px; margin-bottom: 16px; }
+.notice { font-weight: 700; font-size: 14px; margin-bottom: 20px; }
+#banner {
+  border-radius: 14px; padding: 18px 22px; margin-bottom: 28px;
+  color: #fff; font-size: 18px; font-weight: 600;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--wait-bg); transition: background .4s;
+}
+#banner .when { font-size: 13px; font-weight: 400; opacity: .85; flex: none; }
+#banner.checking { animation: breathe 1.2s infinite alternate; }
+@keyframes breathe { from { opacity: .75 } to { opacity: 1 } }
+#banner.ok { background: var(--ok-bg); }
+#banner.partial { background: var(--slow-bg); }
+#banner.down { background: var(--bad-bg); }
+.group-title { font-size: 13px; color: var(--sub); margin: 0 2px 8px; text-transform: uppercase; letter-spacing: .6px; }
+#list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.row { padding: 16px 20px 14px; }
+.row + .row { border-top: 1px solid var(--line); }
+.row-top { display: flex; align-items: center; gap: 10px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--wait); }
+.dot.wait { animation: breathe 1s infinite alternate; }
+.name { font-weight: 600; font-size: 15px; }
+.host { color: var(--sub); font-size: 12px; font-family: Consolas, "Cascadia Mono", "SF Mono", Menlo, monospace; margin-left: 2px; }
+.result { margin-left: auto; text-align: right; flex: none; }
+.state { font-size: 13px; font-weight: 600; }
+.state.ok { color: var(--ok); } .state.bad { color: var(--bad); }
+.state.slow { color: var(--slow); } .state.wait { color: var(--sub); font-weight: 400; }
+.ms { color: var(--sub); font-size: 12px; }
+.ticks { display: flex; gap: 3px; margin-top: 10px; }
+.tick { flex: 1; height: 26px; border-radius: 2px; background: var(--tick); min-width: 3px; }
+.dot.ok, .tick.ok { background: var(--ok); }
+.dot.bad, .tick.bad { background: var(--bad); }
+.dot.slow, .tick.slow { background: var(--slow); }
+.tick-label { display: flex; justify-content: space-between; color: var(--sub); font-size: 11px; margin-top: 5px; }
+button {
+  display: block; width: 100%; margin-top: 24px; padding: 13px;
+  border: none; border-radius: 999px; background: var(--accent); color: #fff;
+  font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+button:hover { filter: brightness(1.06); }
+button:disabled { opacity: .5; cursor: default; }
+#hint { display: none; margin-top: 20px; padding: 14px 18px; border-radius: 14px;
+  background: var(--card); border: 1px solid var(--line); font-size: 13px; color: var(--sub); line-height: 1.8; }
+#hint b { color: var(--text); }
+footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line);
+  color: var(--sub); font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>xdnmb status</h1>
+
+<p class="notice">检测刷新过快可能导致暂时的 429 Too Many Requests 错误</p>
+
+<div id="banner" class="checking"><span id="banner-text">正在检测…</span><span class="when" id="time"></span></div>
+
+<p class="group-title">服务组件</p>
+<div id="list"></div>
+
+<button id="btn" onclick="runAll()">重新检测</button>
+<div id="hint"></div>
+
+<footer>本页面为静态文件，不收集任何数据</footer>
+
+<script>
+const PROBES = [
+  { name: "主站",        host: "www.nmbxd.com",  type: "fetch", api: true, url: "https://www.nmbxd.com/Api/getCdnPath" },
+  { name: "主站备用域名", host: "www.nmbxd1.com", type: "fetch", api: true, url: "https://www.nmbxd1.com/Api/getCdnPath" },
+  { name: "备用 API",    host: "api.nmb.best",   type: "fetch", api: true, url: "https://api.nmb.best/Api/getCdnPath" },
+  { name: "图片 CDN",    host: "image.nmb.best", type: "img",   cdn: true, url: "https://image.nmb.best/thumb/2022-12-04/638c87770b738.jpg" },
+  { name: "公告服务",    host: "nmb.ovear.info", type: "fetch", url: "https://nmb.ovear.info/nmb-notice.json" },
+];
+const TIMEOUT = 10000, SLOW = 3000, AUTO_INTERVAL = 300000;
+const HISTORY_MAX = 40, HISTORY_KEY = "xdao-status-history";
+const STATE_TEXT = { ok: "正常", slow: "缓慢", bad: "不可用" };
+const $ = id => document.getElementById(id);
+
+let history = {};
+try { history = JSON.parse(localStorage.getItem(HISTORY_KEY)) || {}; } catch {}
+for (const k in history) {
+  history[k] = Array.isArray(history[k]) ? history[k].filter(s => ["ok", "slow", "bad"].includes(s)) : [];
+}
+
+PROBES.forEach((p, i) => {
+  const el = document.createElement("div");
+  el.className = "row";
+  el.innerHTML = `<div class="row-top">
+      <span class="dot wait" id="dot${i}"></span>
+      <span class="name">${p.name}</span><span class="host">${p.host}</span>
+      <div class="result"><div class="state wait" id="state${i}">检测中</div><div class="ms" id="ms${i}"></div></div>
+    </div>
+    <div class="ticks" id="ticks${i}"></div>
+    <div class="tick-label"><span>较早</span><span>最近 ${HISTORY_MAX} 次检测</span></div>`;
+  $("list").appendChild(el);
+  renderTicks(i);
+});
+
+function renderTicks(i) {
+  const h = history[PROBES[i].host] || [];
+  $("ticks" + i).innerHTML = Array.from({ length: HISTORY_MAX },
+    (_, k) => `<span class="tick ${h[h.length - HISTORY_MAX + k] || ""}"></span>`).join("");
+}
+
+function record(i, status) {
+  const host = PROBES[i].host;
+  (history[host] = history[host] || []).push(status);
+  if (history[host].length > HISTORY_MAX) history[host] = history[host].slice(-HISTORY_MAX);
+  renderTicks(i);
+}
+
+function probeImg(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const timer = setTimeout(() => { img.src = ""; reject(); }, TIMEOUT);
+    img.onload = () => { clearTimeout(timer); resolve(); };
+    img.onerror = () => { clearTimeout(timer); reject(); };
+    img.src = url + "?_=" + Date.now();
+  });
+}
+function probeFetch(url) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT);
+  return fetch(url + "?_=" + Date.now(), { mode: "no-cors", cache: "no-store", signal: ctrl.signal })
+    .finally(() => clearTimeout(timer));
+}
+
+async function runOne(p, i) {
+  const dot = $("dot" + i), state = $("state" + i), ms = $("ms" + i);
+  dot.className = "dot wait"; state.className = "state wait"; state.textContent = "检测中"; ms.textContent = "";
+  const t0 = performance.now();
+  let cls;
+  try {
+    await (p.type === "img" ? probeImg(p.url) : probeFetch(p.url));
+    const dt = Math.round(performance.now() - t0);
+    cls = dt > SLOW ? "slow" : "ok";
+    ms.textContent = dt + " ms";
+  } catch {
+    cls = "bad";
+    ms.textContent = "超时或被拦截";
+  }
+  dot.className = "dot " + cls;
+  state.className = "state " + cls;
+  state.textContent = STATE_TEXT[cls];
+  record(i, cls);
+  return cls;
+}
+
+function setBanner(cls, text) {
+  $("banner").className = cls;
+  $("banner-text").textContent = text;
+}
+
+let running = false, lastRun = 0;
+async function runAll() {
+  if (running) return;
+  running = true;
+  lastRun = Date.now();
+  $("btn").disabled = true;
+  setBanner("checking", "正在检测…");
+  const states = await Promise.all(PROBES.map(runOne));
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch {}
+  running = false;
+  $("btn").disabled = false;
+  $("time").textContent = new Date().toLocaleTimeString();
+
+  const badCount = states.filter(s => s === "bad").length;
+  if (badCount === states.length) setBanner("down", "全部服务不可用");
+  else if (badCount > 0) setBanner("partial", "部分服务不可用");
+  else if (states.includes("slow")) setBanner("partial", "服务可用，部分响应缓慢");
+  else setBanner("ok", "全部服务正常");
+
+  const apiOK = states.some((s, i) => PROBES[i].api && s !== "bad");
+  const cdnBad = states.some((s, i) => PROBES[i].cdn && s === "bad");
+  let msg = "";
+  if (apiOK && cdnBad) msg = "<b>接口正常但图片 CDN 不通</b> —— 典型的 DNS 污染特征。可尝试：在系统设置中启用加密 DNS（DoH），或更换网络 / 开启代理后重试。";
+  else if (!apiOK) msg = "<b>接口全部不通</b> —— 你的网络可能无法访问 X 岛，或 X 岛服务整体故障。";
+  $("hint").innerHTML = msg;
+  $("hint").style.display = msg ? "block" : "none";
+}
+runAll();
+setInterval(() => { if (!document.hidden) runAll(); }, AUTO_INTERVAL);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && Date.now() - lastRun > AUTO_INTERVAL) runAll();
+});
+</script>
+</body>
+</html>
