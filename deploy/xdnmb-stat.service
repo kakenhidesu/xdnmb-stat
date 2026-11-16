@@ -1,0 +1,21 @@
+[Unit]
+Description=Xdao status image sample catalogue
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/xdnmb-stat/xdnmb-stat
+DynamicUser=yes
+Environment=XDAO_HOST=127.0.0.1
+Environment=XDAO_PORT=8787
+Environment=GOMEMLIMIT=32MiB
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
