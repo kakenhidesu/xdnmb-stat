@@ -52,6 +52,8 @@ Certbot webroot 续期需保留 `/.well-known/acme-challenge/` 路由，并将 [
 
 ## 本地开发与验证
 
+页面沿用 kusotech 主页的配色与传统控件样式。已安装的设备优先使用 MS Gothic；其他设备自动加载随站点提供的 Noto Sans Mono CJK SC 衍生字体，不需要安装字体。它是相近的 Gothic 替代字体，并非 MS Gothic 原版。字体仅包含界面与内置检测消息用字，其他字符回退到设备字体；许可和来源见 `docs/assets/fonts/`。修改界面文字后可用 `scripts/build_webfont.py` 从原始 OTF 重新生成，并递增脚本内的字体文件版本以更新浏览器缓存；需要 Python 的 `fonttools[woff]`，服务器不需要这些构建工具。
+
 仅开发机器需要 Go 1.22+；可选的前端逻辑检查需要 Node.js：
 
 ```sh

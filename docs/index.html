@@ -3,20 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#782525">
   <link rel="canonical" href="https://status.kusotech.club/">
   <title>X 岛服务状态</title>
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
   <style>
-    :root { color-scheme: light dark; font-family: "MS Gothic", "ＭＳ ゴシック", "SimSun", monospace; color: #242628; background: #f8f9fa; }
+    :root { color-scheme: light; font-family: "MS Gothic", "ＭＳ ゴシック", "Nmb Gothic", monospace; color: #472b29; background: #f6ead9; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100svh; display: grid; place-items: center; padding: 32px 20px; }
     main { width: min(100%, 760px); text-align: center; }
-    .entry { display: inline-block; margin: 0 0 24px; border-radius: 10px; padding: 11px 22px; color: #fff; background: #167d60; text-decoration: none; font-size: 16px; }
-    .entry:hover { background: #11654d; }
-    .entry:focus-visible { outline: 3px solid #70cbb0; outline-offset: 4px; }
-    figure { margin: 0; }
-    img { display: block; margin: 0 auto; border-radius: 12px; object-fit: contain; }
-    @media (prefers-color-scheme: dark) { :root { color: #eceeef; background: #171819; } }
+    .entry { display: inline-block; margin: 0 0 20px; border: 2px solid; border-color: #fff #404040 #404040 #fff; padding: 8px 16px; color: #5d151b; background: #c0c0c0; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf; text-decoration: none; font-size: 16px; }
+    .entry:hover { background: #d0d0d0; }
+    .entry:active { border-color: #404040 #fff #fff #404040; box-shadow: inset 1px 1px #808080; }
+    .entry:focus-visible { outline: 2px dashed #782525; outline-offset: 4px; }
+    figure { margin: 0; padding: 8px; border: 3px double #5d151b; background: #fffdf3; }
+    img { display: block; margin: 0 auto; object-fit: contain; }
   </style>
 </head>
 <body>

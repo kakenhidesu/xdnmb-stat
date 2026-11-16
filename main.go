@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -18,11 +19,18 @@ import (
 	"time"
 )
 
-//go:embed index.html status-page.js status.css
+//go:embed index.html status-page.js status.css docs/assets/fonts/*
 var assets embed.FS
 
 func newHandler(store *monitorStore) http.Handler {
 	types := map[string]string{"index.html": "text/html; charset=utf-8", "status-page.js": "application/javascript; charset=utf-8", "status.css": "text/css; charset=utf-8"}
+	fonts, _ := assets.ReadDir("docs/assets/fonts")
+	fontTypes := map[string]string{".woff2": "font/woff2", ".css": "text/css; charset=utf-8", ".txt": "text/plain; charset=utf-8"}
+	for _, font := range fonts {
+		if kind, ok := fontTypes[path.Ext(font.Name())]; ok && !font.IsDir() {
+			types["assets/fonts/"+font.Name()] = kind
+		}
+	}
 	active := make(chan struct{}, 32)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -58,7 +66,11 @@ func newHandler(store *monitorStore) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		file, err := assets.Open(name)
+		assetName := name
+		if strings.HasPrefix(name, "assets/fonts/") {
+			assetName = "docs/" + name
+		}
+		file, err := assets.Open(assetName)
 		if err != nil {
 			http.Error(w, "Unable to serve this request", 500)
 			return
@@ -66,6 +78,9 @@ func newHandler(store *monitorStore) http.Handler {
 		defer file.Close()
 		w.Header().Set("Content-Type", kind)
 		w.Header().Set("Cache-Control", "no-cache")
+		if strings.HasSuffix(name, ".woff2") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		http.ServeContent(w, r, name, time.Time{}, file.(io.ReadSeeker))
 	})
 }

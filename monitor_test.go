@@ -271,11 +271,26 @@ func TestHTTPReadsDoNotProbeOrWrite(t *testing.T) {
 			t.Errorf("route %s exposed", route)
 		}
 	}
-	for _, route := range []string{"/", "/api/status", "/status.css", "/status-page.js"} {
+	for _, route := range []string{"/", "/api/status", "/status.css", "/status-page.js", "/assets/fonts/fonts.css", "/assets/fonts/nmb-gothic-ui-v1.woff2"} {
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, httptest.NewRequest("HEAD", route, nil))
 		if w.Code != 200 || w.Body.Len() != 0 {
 			t.Fatal("invalid HEAD")
+		}
+	}
+	font := httptest.NewRecorder()
+	handler.ServeHTTP(font, httptest.NewRequest("GET", "/assets/fonts/nmb-gothic-ui-v1.woff2", nil))
+	if font.Code != 200 || font.Header().Get("Content-Type") != "font/woff2" || !strings.HasPrefix(font.Body.String(), "wOF2") {
+		t.Fatal("web font was not served as WOFF2")
+	}
+	if font.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		t.Fatal("versioned web font is not cached")
+	}
+	for _, route := range []string{"/assets/fonts/missing.woff2", "/assets/fonts/../../main.go", "/docs/index.html"} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("GET", route, nil))
+		if w.Code != 404 {
+			t.Errorf("unlisted asset %s exposed", route)
 		}
 	}
 	w := httptest.NewRecorder()
