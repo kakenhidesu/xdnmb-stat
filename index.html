@@ -5,42 +5,38 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta name="description" content="X 岛服务状态、90 天可用性记录与自动故障事件。由服务器定期监测，无需手动测试。">
-  <title>X 岛服务状态</title>
+  <title>nmb-status</title>
   <link rel="stylesheet" href="status.css">
   <script defer src="status-page.js"></script>
 </head>
 <body>
   <div class="page">
     <header class="header">
-      <a class="brand" href="/" aria-label="X 岛状态页首页"><span class="brand-mark">X</span><span>X 岛<span class="brand-label">STATUS</span></span></a>
+      <a class="brand" href="/" aria-label="nmb-status 首页">nmb-status</a>
       <nav aria-label="页面导航"><a href="#history">历史事件 <span aria-hidden="true">↗</span></a><a href="https://github.com/kakenhidesu/xdnmb-stat" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a></nav>
     </header>
 
     <main>
       <section class="hero" aria-labelledby="headline">
-        <div class="eyebrow"><span class="live-dot"></span> 服务运行状态</div>
         <div class="headline-row"><span id="hero-icon" class="hero-icon unknown" aria-hidden="true">·</span><h1 id="headline">正在读取监测记录</h1></div>
-        <p id="summary" class="hero-description">后台探针定期运行，此页面展示已记录的结果。</p>
         <div class="meta"><span id="probe-location">服务器监测节点</span><span class="meta-dot">·</span><span id="last-updated">等待最新记录</span></div>
         <p id="load-warning" class="notice" hidden></p>
       </section>
 
       <section aria-labelledby="system-title" class="system-section">
         <div class="section-heading"><h2 id="system-title">服务状态</h2><div class="period-switch" role="group" aria-label="历史展示范围"><button type="button" data-period="30" aria-pressed="false">30 天</button><button type="button" data-period="90" aria-pressed="true" class="selected">90 天</button></div></div>
-        <div class="section-caption"><span>每个色块代表一天的记录</span><span id="interval-label">自动监测</span></div>
         <div id="components" class="components" aria-busy="true"><div class="loading-card">正在载入服务状态…</div></div>
         <div class="legend" aria-label="历史状态图例"><span><i class="operational"></i>正常</span><span><i class="slow"></i>较慢但可用</span><span><i class="degraded"></i>部分失败</span><span><i class="outage"></i>不可用</span><span><i class="unknown"></i>无记录 / 未知</span><span><i class="incomplete"></i>记录不完整</span></div>
-        <p class="footnote">可用率按可判定的记录计算，较慢但验证成功仍计为可用；未知区间不参与计算。原图完整下载超过 10 秒仅提示较慢，30 秒未完成记为未知；接口和缩略图超过 3 秒仅提示较慢。点击色块可查看当天记录。</p>
       </section>
 
       <section id="history" class="history-section" aria-labelledby="history-title">
-        <div class="section-heading"><h2 id="history-title">历史事件</h2><span id="history-count" class="subtle">自动记录故障与恢复</span></div>
+        <div class="section-heading"><h2 id="history-title">历史事件</h2><span id="history-count" class="subtle"></span></div>
         <div id="incidents" class="incidents"><div class="empty">正在读取事件记录…</div></div>
         <button id="more-incidents" class="more" type="button" hidden>查看更多事件</button>
       </section>
     </main>
 
-    <footer><div><span class="footer-brand">X 岛服务状态</span><span>非官方监测 · 北京时间（UTC+8）</span></div><p id="scope-note">结果来自单个服务器监测节点，不代表所有地区或每位用户的连接情况。图片采用抽样检测，不包含上传功能。</p><p id="record-start" class="record-start"></p></footer>
+    <footer>非官方 · 单节点抽样 · UTC+8</footer>
   </div>
 </body>
 </html>

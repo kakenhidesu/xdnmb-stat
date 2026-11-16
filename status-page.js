@@ -49,7 +49,7 @@
       caption.append(node('span', '', `${period} 天前`), node('span', 'uptime', `${percentage(rates.availability)} 已记录可用率`), node('span', '', '今天'));
       const probeDetail = node('details', 'probe-detail'); probeDetail.dataset.id = component.id; probeDetail.open = expanded.has(component.id);
       const summary = node('summary'); summary.append(node('span', '', component.latencyMs ? `${isImage ? '最长下载' : '最近响应'} ${component.latencyMs.toLocaleString()} ms` : '最近一次检测'), node('span', 'expand', '+'));
-      probeDetail.append(summary, node('p', '', `${component.detail}。所选时段记录覆盖率 ${percentage(rates.coverage)}。`));
+      probeDetail.append(summary, node('p', '', `${component.detail}。覆盖率 ${percentage(rates.coverage)}。`));
       row.append(bars, caption, detail, probeDetail); group.append(row);
     }
     $('components').replaceChildren(fragment); $('components').setAttribute('aria-busy', 'false');
@@ -57,9 +57,9 @@
 
   function renderIncidents() {
     const events = data.incidents || [];
-    $('history-count').textContent = events.length ? `最近 ${events.length} 条事件记录` : '自动记录故障与恢复';
+    $('history-count').textContent = events.length ? `${events.length} 条` : '';
     const fragment = document.createDocumentFragment();
-    if (!events.length) { const empty = node('div', 'empty', '暂无已记录的故障事件'); empty.append(node('span', '', '较慢但成功的请求只记录性能状态，不触发故障事件。')); fragment.append(empty); }
+    if (!events.length) fragment.append(node('div', 'empty', '暂无故障记录'));
     for (const event of events.slice(0, eventLimit)) {
       const row = node('article', 'incident'), when = node('div', 'incident-time', time(event.startedAt, true));
       when.append(node('span', '', time(event.startedAt).split(' ').at(-1)));
@@ -77,12 +77,9 @@
     const state = data.overall;
     $('headline').textContent = data.storageError ? '监测记录暂时无法保存' : data.stale ? (data.checkedAt ? '监测记录等待更新' : '等待首次定期检测') : headlines[state] || headlines.unknown;
     $('hero-icon').className = `hero-icon ${state}`; $('hero-icon').textContent = { operational: '✓', slow: '≈', degraded: '!', outage: '×', unknown: '·' }[state] || '·';
-    $('summary').textContent = state === 'operational' ? '最近一轮探针未发现异常，所有监测项目均已通过检查。' : state === 'slow' ? '所有项目均已完成验证，部分请求耗时较长；仅作性能提示，不计为故障。' : state === 'degraded' || state === 'outage' ? '后台探针记录到请求或内容验证失败，受影响的组件及事件记录见下方。' : '暂无完整、及时的监测结果；未知区间不会被算作可用。';
     $('probe-location').textContent = `${data.location} · 每 ${data.intervalSeconds / 60} 分钟检测`;
     $('last-updated').textContent = `最后检测 ${time(data.checkedAt)}`;
-    $('interval-label').textContent = '页面每分钟同步记录';
-    $('record-start').textContent = `最早保留记录：${time(data.monitoringSince)} · 保存最近 ${data.retentionDays} 天`;
-    $('load-warning').hidden = !data.historyWarning; $('load-warning').textContent = data.historyWarning ? '部分历史记录无法读取，对应空缺不计作正常。' : '';
+    $('load-warning').hidden = !data.historyWarning; $('load-warning').textContent = data.historyWarning ? '部分历史记录无法读取。' : '';
     renderComponents(); renderIncidents();
   }
   async function load() {
@@ -98,8 +95,7 @@
       if (key !== lastRendered || !$('load-warning').hidden) { render(); lastRendered = key; }
     } catch {
       $('headline').textContent = '暂时无法读取监测记录'; $('hero-icon').className = 'hero-icon unknown'; $('hero-icon').textContent = '·';
-      $('summary').textContent = '状态页与监测服务器的连接暂不可用，不能据此判断 X 岛服务状态。';
-      $('load-warning').hidden = false; $('load-warning').textContent = data ? `以下为最后一次取得的记录（${time(data.checkedAt)}），页面会自动重试。` : '页面会自动重试，无需手动发起检测。';
+      $('load-warning').hidden = false; $('load-warning').textContent = data ? `显示 ${time(data.checkedAt)} 的记录，正在重试。` : '正在重试。';
     } finally { clearTimeout(timer); loading = false; }
   }
   document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => {
