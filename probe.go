@@ -23,15 +23,18 @@ import (
 )
 
 const (
-	operational      = "operational"
-	degraded         = "degraded"
-	outage           = "outage"
-	unknown          = "unknown"
-	recentCount      = 3
-	maxCDNs          = 3
-	maxResponseBytes = 2 << 20
-	maxImageBytes    = 10 << 20
-	slowThreshold    = 3 * time.Second
+	operational           = "operational"
+	slow                  = "slow"
+	degraded              = "degraded"
+	outage                = "outage"
+	unknown               = "unknown"
+	recentCount           = 3
+	maxCDNs               = 3
+	maxResponseBytes      = 2 << 20
+	maxImageBytes         = 10 << 20
+	slowThreshold         = 3 * time.Second
+	originalSlowThreshold = 10 * time.Second
+	originalTimeout       = 30 * time.Second
 )
 
 type componentDef struct {
@@ -62,6 +65,7 @@ type observation struct {
 	Detail    string `json:"detail"`
 }
 type record struct {
+	Version    int           `json:"version,omitempty"`
 	At         int64         `json:"at"`
 	StartedAt  int64         `json:"startedAt"`
 	Components []observation `json:"components"`
@@ -109,7 +113,7 @@ func aggregate(states []string) string {
 	if len(states) == 0 {
 		return unknown
 	}
-	bad, pending, slow := 0, false, false
+	bad, pending, partial, sluggish := 0, false, false, false
 	for _, state := range states {
 		switch state {
 		case outage:
@@ -117,17 +121,22 @@ func aggregate(states []string) string {
 		case unknown:
 			pending = true
 		case degraded:
-			slow = true
+			partial = true
+		case slow:
+			sluggish = true
 		}
 	}
 	if bad == len(states) {
 		return outage
 	}
-	if bad > 0 || slow {
+	if bad > 0 || partial {
 		return degraded
 	}
 	if pending {
 		return unknown
+	}
+	if sluggish {
+		return slow
 	}
 	return operational
 }
@@ -243,9 +252,15 @@ func fetchJSON(ctx context.Context, client *http.Client, endpoint string, dest a
 	return nil
 }
 func measure(fn func() error) probeCheck {
+	return measureWithThreshold(slowThreshold, fn)
+}
+func measureWithThreshold(threshold time.Duration, fn func() error) probeCheck {
 	start := time.Now()
 	err := fn()
 	elapsed := time.Since(start)
+	return classifyProbe(err, elapsed, threshold)
+}
+func classifyProbe(err error, elapsed, threshold time.Duration) probeCheck {
 	if err != nil {
 		detail := err.Error()
 		var redirectErr redirectPolicyError
@@ -263,9 +278,9 @@ func measure(fn func() error) probeCheck {
 	}
 	status := operational
 	detail := "验证通过"
-	if elapsed > slowThreshold {
-		status = degraded
-		detail = "响应缓慢（超过 3 秒）"
+	if elapsed > threshold {
+		status = slow
+		detail = fmt.Sprintf("验证通过，响应较慢（超过 %.0f 秒）", threshold.Seconds())
 	}
 	return probeCheck{status, detail, elapsed.Milliseconds()}
 }
@@ -304,10 +319,19 @@ func checkAPI(ctx context.Context, client *http.Client, origin, id string, now t
 	result.result = observation{ID: id, Status: aggregate([]string{config.status, content.status}), LatencyMS: max(config.latency, content.latency), Detail: "CDN 配置：" + config.detail + "；帖子列表：" + content.detail}
 	return result
 }
-func checkImage(ctx context.Context, client *http.Client, endpoint string) probeCheck {
+func checkImage(ctx context.Context, client *http.Client, endpoint string, original bool) probeCheck {
+	threshold, timeout := slowThreshold, 10*time.Second
+	if original {
+		threshold, timeout = originalSlowThreshold, originalTimeout
+	}
+	imageCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	imageClient := *client
+	// The original image has its own full-download budget, independent of API timeout.
+	imageClient.Timeout = 0
 	limited := false
-	result := measure(func() error {
-		resp, err := request(ctx, client, endpoint)
+	result := measureWithThreshold(threshold, func() error {
+		resp, err := request(imageCtx, &imageClient, endpoint)
 		if err != nil {
 			return err
 		}
@@ -343,6 +367,10 @@ func checkImage(ctx context.Context, client *http.Client, endpoint string) probe
 	if limited {
 		result.status = unknown
 	}
+	if imageCtx.Err() != nil && result.status == outage {
+		result.status = unknown
+		result.detail = fmt.Sprintf("下载超时或检测中断（单张上限 %.0f 秒），未能完成验证", timeout.Seconds())
+	}
 	return result
 }
 func probeOnce(ctx context.Context, client *http.Client, now time.Time) record {
@@ -377,7 +405,7 @@ func probeOnce(ctx context.Context, client *http.Client, now time.Time) record {
 	}()
 	wg.Wait()
 	bases, paths := map[string]bool{}, map[string]bool{}
-	run := record{StartedAt: now.UnixMilli(), Components: []observation{}}
+	run := record{Version: 2, StartedAt: now.UnixMilli(), Components: []observation{}}
 	for _, api := range results {
 		run.Components = append(run.Components, api.result)
 		for _, base := range api.cdns {
@@ -436,7 +464,7 @@ func probeOnce(ctx context.Context, client *http.Client, now time.Time) record {
 				if ctx.Err() != nil {
 					checks[index] = probeCheck{unknown, "本轮探针超时", 0}
 				} else {
-					checks[index] = checkImage(ctx, client, jobs[index].url)
+					checks[index] = checkImage(ctx, client, jobs[index].url, jobs[index].kind == 1)
 				}
 			}
 		}()
@@ -448,7 +476,7 @@ func probeOnce(ctx context.Context, client *http.Client, now time.Time) record {
 	wg.Wait()
 	for k, id := range []string{"thumbnails", "originals"} {
 		states := []string{}
-		passed, slow, total := 0, 0, 0
+		passed, slowCount, total := 0, 0, 0
 		latency := int64(0)
 		failure := ""
 		for i, job := range jobs {
@@ -459,18 +487,22 @@ func probeOnce(ctx context.Context, client *http.Client, now time.Time) record {
 			states = append(states, check.status)
 			total++
 			latency = max(latency, check.latency)
-			if check.status == operational || check.status == degraded {
+			if check.status == operational || check.status == slow {
 				passed++
-				if check.status == degraded {
-					slow++
+				if check.status == slow {
+					slowCount++
 				}
 			} else if failure == "" {
 				failure = check.detail
 			}
 		}
 		detail := fmt.Sprintf("%d/%d 张图片通过；%d 张近期样本", passed, total, len(recent))
-		if slow > 0 {
-			detail += fmt.Sprintf("；%d 张响应超过 3 秒", slow)
+		if slowCount > 0 {
+			threshold := slowThreshold
+			if k == 1 {
+				threshold = originalSlowThreshold
+			}
+			detail += fmt.Sprintf("；%d 张加载较慢（完整下载超过 %.0f 秒）", slowCount, threshold.Seconds())
 		}
 		if failure != "" {
 			detail += "；" + failure

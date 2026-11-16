@@ -27,6 +27,7 @@ type dayStats struct {
 	Checks   int    `json:"checks"`
 	OK       int    `json:"ok"`
 	Slow     int    `json:"slow"`
+	Degraded int    `json:"degraded"`
 	Failed   int    `json:"failed"`
 	Unknown  int    `json:"unknown"`
 	Expected int    `json:"expected"`
@@ -109,6 +110,7 @@ func newMonitorStore(dir string, interval time.Duration, location string, now ti
 				store.historyWarning = true
 				continue
 			}
+			run = normalizeLegacyPerformance(run)
 			if run.At > store.latest.At {
 				store.apply(run)
 			}
@@ -131,12 +133,45 @@ func validRecord(run record) bool {
 			return false
 		}
 		switch result.Status {
-		case operational, degraded, outage, unknown:
+		case operational, slow, degraded, outage, unknown:
 		default:
 			return false
 		}
 	}
 	return true
+}
+
+var legacyImageSuccess = regexp.MustCompile(`^(\d+)/(\d+) 张图片通过；3 张近期样本(?:；\d+ 张响应超过 3 秒)?$`)
+var legacyAPISuccess = regexp.MustCompile(`^CDN 配置：(验证通过|响应缓慢（超过 3 秒）)；帖子列表：(验证通过|响应缓慢（超过 3 秒）)$`)
+
+// Reclassify only legacy records that explicitly prove successful validation.
+// Raw journals remain unchanged; failures and incomplete coverage stay untouched.
+func normalizeLegacyPerformance(run record) record {
+	if run.Version >= 2 {
+		return run
+	}
+	for i := range run.Components {
+		result := &run.Components[i]
+		if result.Status != degraded {
+			continue
+		}
+		if result.ID == "originals" || result.ID == "thumbnails" {
+			match := legacyImageSuccess.FindStringSubmatch(result.Detail)
+			if len(match) != 3 || match[1] != match[2] || match[1] == "0" {
+				continue
+			}
+			threshold := slowThreshold
+			if result.ID == "originals" {
+				threshold = originalSlowThreshold
+			}
+			result.Status = classifyProbe(nil, time.Duration(result.LatencyMS)*time.Millisecond, threshold).status
+			result.Detail = fmt.Sprintf("%s/%s 张图片通过；3 张近期样本；最长下载 %.2f 秒（历史性能分类已修正）", match[1], match[2], float64(result.LatencyMS)/1000)
+		} else if legacyAPISuccess.MatchString(result.Detail) || result.ID == "notice" && result.Detail == "响应缓慢（超过 3 秒）" {
+			result.Status = slow
+			result.Detail = strings.ReplaceAll(result.Detail, "响应缓慢（超过 3 秒）", "验证通过，响应较慢（超过 3 秒）")
+		}
+	}
+	return run
 }
 
 // Only the scheduler calls append. HTTP readers never initiate probes or writes.
@@ -202,8 +237,10 @@ func (s *monitorStore) apply(run record) {
 		switch result.Status {
 		case operational:
 			day.OK++
-		case degraded:
+		case slow:
 			day.Slow++
+		case degraded:
+			day.Degraded++
 		case outage:
 			day.Failed++
 		default:
@@ -225,7 +262,7 @@ func (s *monitorStore) apply(run record) {
 					s.incidents[active].Severity = outage
 				}
 			}
-		} else if result.Status == operational && active >= 0 {
+		} else if (result.Status == operational || result.Status == slow) && active >= 0 {
 			s.incidents[active].Status = "resolved"
 			s.incidents[active].EndedAt = run.At
 		}
@@ -321,15 +358,17 @@ func (s *monitorStore) view(now time.Time) statusView {
 				day.Status = unknown
 			case day.Failed == day.Checks:
 				day.Status = outage
-			case day.Failed > 0 || day.Slow > 0:
+			case day.Failed > 0 || day.Degraded > 0:
 				day.Status = degraded
 			case day.Unknown > 0:
 				day.Status = unknown
+			case day.Slow > 0:
+				day.Status = slow
 			default:
 				day.Status = operational
 			}
-			known += day.OK + day.Slow + day.Failed
-			available += day.OK
+			known += day.OK + day.Slow + day.Degraded + day.Failed
+			available += day.OK + day.Slow
 			expected += day.Expected
 			observed += day.Checks
 			row.History = append(row.History, day)

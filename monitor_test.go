@@ -371,7 +371,7 @@ func TestImageChecksValidateBytesAndLimits(t *testing.T) {
 			w.WriteHeader(tc.code)
 			io.WriteString(w, tc.body)
 		}))
-		result := checkImage(context.Background(), server.Client(), server.URL)
+		result := checkImage(context.Background(), server.Client(), server.URL, true)
 		server.Close()
 		if result.status != tc.want {
 			t.Fatalf("%+v", result)
@@ -384,13 +384,116 @@ func TestStateAggregationNeverHidesMissingCoverage(t *testing.T) {
 	}
 }
 
-func TestDegradedChecksReduceNormalRate(t *testing.T) {
+func TestFailedChecksReduceAvailability(t *testing.T) {
 	store := testStore(t)
 	store.append(sample(testNow, operational))
 	store.append(sample(testNow.Add(5*time.Minute), degraded))
 	view := store.view(testNow.Add(6 * time.Minute))
 	if *view.Components[0].Uptime != 50 {
 		t.Fatal("degraded service displayed as 100% normal")
+	}
+}
+
+func TestSlowSuccessIsAvailableWithoutFaultIncidents(t *testing.T) {
+	store := testStore(t)
+	store.append(sample(testNow, operational))
+	store.append(sample(testNow.Add(5*time.Minute), slow))
+	view := store.view(testNow.Add(6 * time.Minute))
+	if view.Overall != slow || len(view.Incidents) != 0 || *view.Components[0].Uptime != 100 || view.Components[0].History[89].Slow != 1 {
+		t.Fatalf("slow success treated as failure: %+v", view)
+	}
+	store.append(sample(testNow.Add(10*time.Minute), outage))
+	store.append(sample(testNow.Add(15*time.Minute), slow))
+	view = store.view(testNow.Add(16 * time.Minute))
+	if *view.Components[0].Uptime != 75 || view.Incidents[0].Status != "resolved" {
+		t.Fatal("slow success did not restore availability")
+	}
+	if aggregate([]string{operational, slow}) != slow || aggregate([]string{slow, unknown}) != unknown || aggregate([]string{slow, outage}) != degraded {
+		t.Fatal("slow state hides failure or missing coverage")
+	}
+}
+
+func TestOriginalDownloadTimingIsNotAnOutage(t *testing.T) {
+	for _, tc := range []struct {
+		duration time.Duration
+		want     string
+	}{{3 * time.Second, operational}, {6 * time.Second, operational}, {10 * time.Second, operational}, {11 * time.Second, slow}, {29 * time.Second, slow}} {
+		if got := classifyProbe(nil, tc.duration, originalSlowThreshold); got.status != tc.want {
+			t.Fatalf("duration=%s result=%+v", tc.duration, got)
+		}
+	}
+	if got := classifyProbe(errors.New("HTTP 503"), time.Second, originalSlowThreshold); got.status != outage {
+		t.Fatal("fast error must still fail")
+	}
+	if got := classifyProbe(nil, 4*time.Second, slowThreshold); got.status != slow {
+		t.Fatal("API latency must not become a fault")
+	}
+}
+
+func TestImageTimeoutIsUnknownButBrokenTransferIsFailure(t *testing.T) {
+	var pngData bytes.Buffer
+	png.Encode(&pngData, image.NewRGBA(image.Rect(0, 0, 2, 2)))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", "20000")
+		w.Write(pngData.Bytes())
+		w.(http.Flusher).Flush()
+		if r.URL.Path == "/stall" {
+			<-r.Context().Done()
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	got := checkImage(ctx, server.Client(), server.URL+"/stall", true)
+	if got.status != unknown || !strings.Contains(got.detail, "超时") {
+		t.Fatalf("timeout result=%+v", got)
+	}
+	got = checkImage(context.Background(), server.Client(), server.URL+"/broken", true)
+	if got.status != outage || !strings.Contains(got.detail, "不完整") {
+		t.Fatalf("broken transfer result=%+v", got)
+	}
+}
+
+func TestLegacyPerformanceReloadPreservesRealFailuresAndRawLogs(t *testing.T) {
+	for _, tc := range []struct {
+		detail  string
+		latency int64
+		version int
+		want    string
+	}{
+		{"5/5 张图片通过；3 张近期样本；3 张响应超过 3 秒", 6000, 0, operational},
+		{"5/5 张图片通过；3 张近期样本", 6000, 0, operational},
+		{"5/5 张图片通过；3 张近期样本；3 张响应超过 3 秒", 12000, 0, slow},
+		{"4/5 张图片通过；3 张近期样本；HTTP 503", 6000, 0, degraded},
+		{"5/5 张图片通过；3 张近期样本；CDN 地址超出本轮覆盖范围", 6000, 0, degraded},
+		{"5/5 张图片通过；3 张近期样本", 6000, 2, degraded},
+	} {
+		run := sample(testNow, degraded)
+		run.Version = tc.version
+		for i := range run.Components {
+			run.Components[i].Status = operational
+		}
+		run.Components[4] = observation{"originals", degraded, tc.latency, tc.detail}
+		raw, _ := json.Marshal(run)
+		dir := t.TempDir()
+		path := filepath.Join(dir, "2026-11-16.jsonl")
+		os.WriteFile(path, append(raw, '\n'), 0600)
+		store, err := newMonitorStore(dir, 5*time.Minute, "test", testNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view := store.view(testNow.Add(time.Minute))
+		if view.Components[4].Status != tc.want {
+			t.Fatalf("detail=%s got=%s", tc.detail, view.Components[4].Status)
+		}
+		if (len(view.Incidents) > 0) != (tc.want == degraded) {
+			t.Fatal("history generated incorrect incident")
+		}
+		after, _ := os.ReadFile(path)
+		if !bytes.Equal(after, append(raw, '\n')) {
+			t.Fatal("original journal was rewritten")
+		}
 	}
 }
 
