@@ -51,6 +51,7 @@ var componentDefs = []componentDef{
 	{"notice", "公告接口", "其他服务", "nmb.ovear.info", "HTTP 状态与公告内容格式"},
 }
 var apiOrigins = []string{"https://www.nmbxd.com", "https://www.nmbxd1.com", "https://api.nmb.best"}
+var apiHosts = map[string]bool{"www.nmbxd.com": true, "nmbxd.com": true, "www.nmbxd1.com": true, "nmbxd1.com": true, "api.nmb.best": true}
 var baselines = []string{"2022-12-04/638c87770b738.jpg", "2026-02-12/698deed346c6c.png"}
 var imagePath = regexp.MustCompile(`(?i)^\d{4}-\d{2}-\d{2}/[a-zA-Z0-9_-]+\.(jpe?g|png|gif)$`)
 
@@ -83,6 +84,25 @@ type apiProbe struct {
 	result observation
 	cdns   []string
 	paths  []string
+}
+
+type redirectPolicyError string
+
+func (e redirectPolicyError) Error() string { return string(e) }
+
+// Follow ordinary HTTPS redirects, while keeping probes on the intended service.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 || len(via) > 5 {
+		return redirectPolicyError("跳转次数超过检测上限")
+	}
+	target, initial := req.URL, via[0].URL
+	if target.Scheme != "https" || target.User != nil || target.Port() != "" && target.Port() != "443" {
+		return redirectPolicyError("跳转目标不符合 HTTPS 检测范围")
+	}
+	if strings.EqualFold(target.Host, initial.Host) || apiHosts[strings.ToLower(initial.Hostname())] && apiHosts[strings.ToLower(target.Hostname())] {
+		return nil
+	}
+	return redirectPolicyError("跳转目标不在已知服务范围内，无法确认")
 }
 
 func aggregate(states []string) string {
@@ -228,6 +248,10 @@ func measure(fn func() error) probeCheck {
 	elapsed := time.Since(start)
 	if err != nil {
 		detail := err.Error()
+		var redirectErr redirectPolicyError
+		if errors.As(err, &redirectErr) {
+			return probeCheck{unknown, redirectErr.Error(), elapsed.Milliseconds()}
+		}
 		var requestErr *url.Error
 		if errors.As(err, &requestErr) {
 			detail = "连接失败或请求超时"

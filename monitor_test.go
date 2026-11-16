@@ -22,6 +22,61 @@ import (
 
 var testNow = time.Date(2026, 11, 16, 8, 0, 0, 0, time.UTC)
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestRedirectsValidateFinalResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name, target, body, want string
+		code, calls              int
+	}{
+		{"main moves to known domain", "https://www.nmbxd1.com/Api/getCdnPath", `[{"url":"https://image.nmb.best/"}]`, operational, 200, 2},
+		{"redirect cannot hide error", "https://www.nmbxd1.com/Api/getCdnPath", `{}`, outage, 503, 2},
+		{"redirect cannot hide invalid JSON", "https://www.nmbxd1.com/Api/getCdnPath", `bad`, outage, 200, 2},
+		{"unrelated host is unverified", "https://unrelated.example/", `[]`, unknown, 200, 1},
+		{"HTTP downgrade is unverified", "http://www.nmbxd1.com/Api/getCdnPath", `[]`, unknown, 200, 1},
+		{"embedded credentials are rejected", "https://user:pass@www.nmbxd1.com/", `[]`, unknown, 200, 1},
+		{"nonstandard port is rejected", "https://www.nmbxd1.com:1234/", `[]`, unknown, 200, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			client := &http.Client{CheckRedirect: checkRedirect, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					return &http.Response{StatusCode: 301, Header: http.Header{"Location": {tc.target}}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+				}
+				return &http.Response{StatusCode: tc.code, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(tc.body)), Request: req}, nil
+			})}
+			got := measure(func() error {
+				var result []cdnEntry
+				return fetchJSON(context.Background(), client, apiOrigins[0]+"/Api/getCdnPath", &result)
+			})
+			if got.status != tc.want || calls != tc.calls {
+				t.Fatalf("status=%s detail=%s calls=%d", got.status, got.detail, calls)
+			}
+			if tc.want == unknown && strings.Contains(got.detail, "连接失败") {
+				t.Fatal("policy error mislabeled as network failure")
+			}
+		})
+	}
+}
+
+func TestRedirectLoopStopsAndSameOriginCanRedirect(t *testing.T) {
+	calls := 0
+	client := &http.Client{CheckRedirect: checkRedirect, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: 302, Header: http.Header{"Location": {"https://nmb.ovear.info/next"}}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+	})}
+	got := measure(func() error {
+		var body any
+		return fetchJSON(context.Background(), client, "https://nmb.ovear.info/start", &body)
+	})
+	if got.status != unknown || calls != 6 || !strings.Contains(got.detail, "跳转次数") {
+		t.Fatalf("result=%+v calls=%d", got, calls)
+	}
+}
+
 func sample(at time.Time, status string) record {
 	result := record{At: at.UnixMilli(), StartedAt: at.Add(-time.Second).UnixMilli(), Components: []observation{}}
 	for _, def := range componentDefs {

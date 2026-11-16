@@ -98,7 +98,7 @@ func main() {
 	transport.MaxIdleConnsPerHost = 2
 	transport.MaxConnsPerHost = 3
 	transport.IdleConnTimeout = time.Minute
-	client := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect not allowed") }}
+	client := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: checkRedirect}
 	host, port := os.Getenv("XDAO_HOST"), os.Getenv("XDAO_PORT")
 	if host == "" {
 		host = "127.0.0.1"
