@@ -8,7 +8,7 @@ Type=simple
 ExecStart=/opt/xdnmb-stat/xdnmb-stat
 DynamicUser=yes
 Environment=XDAO_HOST=127.0.0.1
-Environment=XDAO_PORT=8787
+Environment=XDAO_PORT=18787
 Environment=GOMEMLIMIT=32MiB
 Restart=on-failure
 RestartSec=5

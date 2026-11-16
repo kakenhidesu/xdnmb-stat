@@ -341,7 +341,7 @@ func main() {
 		host = "127.0.0.1"
 	}
 	if port == "" {
-		port = "8787"
+		port = "18787"
 	}
 	server := &http.Server{Addr: net.JoinHostPort(host, port), Handler: newHandler(store),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,

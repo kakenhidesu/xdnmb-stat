@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         X 岛状态页：本地接口验证
 // @namespace    https://github.com/kakenhidesu/xdnmb-stat
-// @version      1.0.0
+// @version      1.0.1
 // @description  从测试者自己的浏览器验证公开接口，不使用服务器代理，不发送账号 Cookie。
 // @match        https://kakenhidesu.github.io/xdnmb-stat/*
-// @match        http://localhost:8787/*
-// @match        http://127.0.0.1:8787/*
+// @match        https://status.kusotech.club/*
+// @match        http://localhost:18787/*
+// @match        http://127.0.0.1:18787/*
 // @connect      www.nmbxd.com
 // @connect      www.nmbxd1.com
 // @connect      api.nmb.best

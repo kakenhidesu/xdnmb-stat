@@ -24,7 +24,7 @@ async function pageRun(t, options = {}) {
   const win = {
     addEventListener(type, fn) { if (type === 'message') listeners.add(fn); },
     removeEventListener(type, fn) { listeners.delete(fn); },
-    postMessage(data) { queueMicrotask(() => { for (const fn of [...listeners]) fn({ source: win, origin: 'http://localhost:8787', data }); }); },
+    postMessage(data) { queueMicrotask(() => { for (const fn of [...listeners]) fn({ source: win, origin: 'http://localhost:18787', data }); }); },
   };
   const fetcher = async url => {
     if (url.includes('image-samples.json')) return new Response(JSON.stringify(catalog), { headers: { 'Content-Type': 'application/json' } });
@@ -42,7 +42,7 @@ async function pageRun(t, options = {}) {
       checkImage: url => C.checkImage(url, { ImageClass: FakeImage }),
     },
     document: { getElementById: get, createElement: element, addEventListener() {} }, window: win,
-    location: { origin: 'http://localhost:8787', href: 'http://localhost:8787/' }, URL, Headers, Date,
+    location: { origin: 'http://localhost:18787', href: 'http://localhost:18787/' }, URL, Headers, Date,
     localStorage: { getItem: () => options.corruptHistory || null, setItem() {} },
     console: { error: (...args) => errors.push(args) },
     setTimeout: (fn, delay) => { const id = setTimeout(fn, delay); timers.add(id); return id; },

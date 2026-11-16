@@ -21,7 +21,7 @@
 
 因此，默认模式仍由浏览器直接发起请求，不能读取时显示“无法验证”。访问者可自行在 Tampermonkey 等脚本管理器中安装 [local-probe.user.js](local-probe.user.js) 并刷新页面。脚本通过访问者浏览器发起匿名请求，再把结果交给页面验证。**没有任何接口健康结果来自服务器。** 浏览器、系统或扩展配置的代理仍会影响该访问者实际使用的网络路径；这一请求方式使用浏览器自身网络栈，见 [Tampermonkey 官方说明](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_xmlhttpRequest)。
 
-脚本只允许本页所需的 3 个 API 域名的固定公开接口及公告接口，不支持任意目标代理，不发送账号 Cookie。默认匹配 GitHub Pages 地址和本机 8787 端口；部署到自己的域名后，需要在脚本头部添加对应的精确 `@match`，例如 `https://status.example.com/*`。没有安装脚本的访问者仍能使用图片检测。
+脚本只允许本页所需的 3 个 API 域名的固定公开接口及公告接口，不支持任意目标代理，不发送账号 Cookie。默认匹配 `https://status.kusotech.club/*`、GitHub Pages 地址和本机 18787 端口；使用其他域名时需要添加对应的精确 `@match`。没有安装脚本的访问者仍能使用图片检测。
 
 ## 部署样本目录服务
 
@@ -34,7 +34,11 @@ chmod +x xdnmb-stat
 ./xdnmb-stat
 ```
 
-默认访问 `http://127.0.0.1:8787`。用 `XDAO_HOST`、`XDAO_PORT` 环境变量调整监听地址与端口。公网部署可由现有 HTTPS 反向代理转发到本机 8787；服务同时提供页面及 `/image-samples.json`，没有通用请求代理端点。程序可以在任意工作目录启动。服务需要系统现有的 CA 根证书来验证 X 岛 HTTPS 连接。
+默认访问 `http://127.0.0.1:18787`。用 `XDAO_HOST`、`XDAO_PORT` 环境变量调整监听地址与端口。公网部署可由现有 HTTPS 反向代理转发到本机 18787；服务同时提供页面及 `/image-samples.json`，没有通用请求代理端点。程序可以在任意工作目录启动。服务需要系统现有的 CA 根证书来验证 X 岛 HTTPS 连接。
+
+`status.kusotech.club` 使用独立的 Nginx HTTPS 入口，配置见 [Nginx 配置](deploy/status.kusotech.club.conf)。先让该域名解析到服务器，并取得覆盖该域名的证书，再启用此配置。不要向公网开放内部端口；8787 留给服务器原有的 `/acp/` 服务。旧部署如有 `listen.conf` 覆盖配置，需要将其中的 `XDAO_HOST` 改为 `127.0.0.1`，并明确设定 `XDAO_PORT=18787`。
+
+使用 Certbot webroot 模式续期时，保留配置中的 `/.well-known/acme-challenge/` 路由，并将 [续期重载脚本](deploy/renew-status-certificate.sh) 以可执行权限安装到 `/etc/letsencrypt/renewal-hooks/deploy/xdnmb-stat-nginx-reload`，使新证书在续期后自动被 Nginx 加载。
 
 如果使用 systemd，可将程序放在 `/opt/xdnmb-stat/xdnmb-stat`，将 [部署文件](deploy/xdnmb-stat.service) 放到 `/etc/systemd/system/xdnmb-stat.service`，然后执行：
 
