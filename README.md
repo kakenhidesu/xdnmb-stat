@@ -1,81 +1,71 @@
-<div align="center">
-  
-# xdnmb-stat
-</div>
-<p align="center">
-  <img src="sage.gif" alt="sage">
-</p>
+# X 岛服务状态
 
-从访问者自己的浏览器检测 X 岛接口和图片加载情况。结果只代表当前网络下的一次抽样，不代表所有地区、所有图片或上传功能均正常。
+[status.kusotech.club](https://status.kusotech.club/)：服务器定期探测 X 岛接口和图床，公开最近状态、30 / 90 天历史和自动异常事件。访问页面只读取已有记录，不会触发检测，无需安装浏览器脚本。
 
-## 检测方式
+**结果代表台湾 Google Cloud 单个监测节点与 X 岛之间的连接，不代表访问者的网络，也不是 X 岛官方状态页。** GitHub Pages 入口会跳转到上述站点。
 
-- 图床：2 张固定样本，加上从帖子及回复中选出的最近 7 天内的 3 张不同图片；分别加载缩略图和原图。读取当前 CDN 配置，去重后最多覆盖 3 个地址，图片并发上限为 4。
-- 接口：分别请求 CDN 配置和帖子列表，检查 HTTP 状态、JSON 解析和内容结构；公告接口也检查实际内容。
-- 任何样本失败都不会显示全绿；近期样本不足、CDN 配置无法取得、跨域不可读或覆盖不完整时明确显示“无法验证”。成功文案为“本轮抽样检测通过”。
-- 每 5 分钟自动更新，手动检测间隔至少 30 秒；单个请求最多 10 秒。失败原因只描述观察结果，不直接归因于 DNS。
+## 探针与记录
 
-## 为什么需要可选浏览器脚本
+- 默认每 5 分钟检测一次，无人访问也会运行；探针不重叠，单轮最多 90 秒，每个请求最多 10 秒。
+- 主站、备用域名、备用 API：分别读取 CDN 配置和帖子列表，验证 HTTP 状态、JSON 和内容结构；另检测公告接口。
+- 图床：从当轮帖子和回复中选取最近 7 天内的 3 张不同图片，另加 2 张固定样本；分别测试缩略图和原图，去重后最多覆盖 3 个动态 CDN 地址。旧图成功不能掩盖近期图片失败；配置或近期样本不足时显示未知。
+- 图片检查 HTTP 状态、图片类型和图片头尺寸，并流式读完整个响应。不将图片全部解码到内存；不测试上传功能。最多并发下载 3 张，每张上限 10 MiB，超出上限记为无法确认。
+- HTTP、格式、下载或部分样本失败都会影响组件状态；单项响应超过 3 秒记为响应异常。只描述观测到的错误，不直接归因于 DNS 污染。
+- 每轮结果先写入磁盘，再对外显示。按北京时间分日保存 JSONL，保留最近 90 天；服务重启会读取已有记录。磁盘写入失败、监测超时未更新时，不继续展示全绿。
+- 正常率是可判定记录中正常的比例，缓慢和部分失败也计为异常，不等同于精确的持续可用时间。未知记录不参与正常率；缺失记录通过覆盖率和斜纹标识。尚未开始监测的历史保持灰色。
+- 自动记录异常开始与恢复；监测中断不会被当作恢复。页面列出保留期内最近 500 条事件，原始记录仍按天保存。页面每分钟同步记录，30 / 90 天按钮仅切换展示范围。
 
-截至 2026-11-16，测试的 X 岛接口没有向状态页开放 CORS。普通网页无法读取它们的 HTTP 状态和 JSON；`no-cors` 也不能解决这个问题。服务器代理虽然可以读取，但会测量服务器的网络，不能代表访问者。
+## Linux 部署
 
-因此，默认模式仍由浏览器直接发起请求，不能读取时显示“无法验证”。访问者可自行在 Tampermonkey 等脚本管理器中安装 [local-probe.user.js](local-probe.user.js) 并刷新页面。脚本通过访问者浏览器发起匿名请求，再把结果交给页面验证。**没有任何接口健康结果来自服务器。** 浏览器、系统或扩展配置的代理仍会影响该访问者实际使用的网络路径；这一请求方式使用浏览器自身网络栈，见 [Tampermonkey 官方说明](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_xmlhttpRequest)。
+单个 Go 可执行文件内嵌页面，无第三方依赖；**服务器不需要安装 Node.js 或 Go**，只需要系统 CA 根证书。可在开发机器编译后通过 `scp` 上传，不依赖 GitHub Release。
 
-脚本只允许本页所需的 3 个 API 域名的固定公开接口及公告接口，不支持任意目标代理，不发送账号 Cookie。默认匹配 `https://status.kusotech.club/*`、GitHub Pages 地址和本机 18787 端口；使用其他域名时需要添加对应的精确 `@match`。没有安装脚本的访问者仍能使用图片检测。
-
-## 部署样本目录服务
-
-服务已改为 Go，页面和脚本均内嵌在单个可执行文件中，无第三方依赖。服务器不需要安装 Node.js 或 Go，也不需要单独放置前端文件。服务只提供近期图片路径和 CDN 地址，不提供服务器侧的健康状态；图片仍由访问者浏览器直接加载。
-
-选择与服务器架构匹配的 Linux 包：`linux-amd64` 对应常见的 x86_64，`linux-arm64` 对应 aarch64。解压后运行：
+将 Linux amd64（x86_64）或 arm64（aarch64）可执行文件放到 `/opt/xdnmb-stat/xdnmb-stat`，赋予执行权限，将 [systemd unit](deploy/xdnmb-stat.service) 放到 `/etc/systemd/system/xdnmb-stat.service`：
 
 ```sh
-chmod +x xdnmb-stat
-./xdnmb-stat
-```
-
-默认访问 `http://127.0.0.1:18787`。用 `XDAO_HOST`、`XDAO_PORT` 环境变量调整监听地址与端口。公网部署可由现有 HTTPS 反向代理转发到本机 18787；服务同时提供页面及 `/image-samples.json`，没有通用请求代理端点。程序可以在任意工作目录启动。服务需要系统现有的 CA 根证书来验证 X 岛 HTTPS 连接。
-
-`status.kusotech.club` 使用独立的 Nginx HTTPS 入口，配置见 [Nginx 配置](deploy/status.kusotech.club.conf)。先让该域名解析到服务器，并取得覆盖该域名的证书，再启用此配置。不要向公网开放内部端口；8787 留给服务器原有的 `/acp/` 服务。旧部署如有 `listen.conf` 覆盖配置，需要将其中的 `XDAO_HOST` 改为 `127.0.0.1`，并明确设定 `XDAO_PORT=18787`。
-
-使用 Certbot webroot 模式续期时，保留配置中的 `/.well-known/acme-challenge/` 路由，并将 [续期重载脚本](deploy/renew-status-certificate.sh) 以可执行权限安装到 `/etc/letsencrypt/renewal-hooks/deploy/xdnmb-stat-nginx-reload`，使新证书在续期后自动被 Nginx 加载。
-
-如果使用 systemd，可将程序放在 `/opt/xdnmb-stat/xdnmb-stat`，将 [部署文件](deploy/xdnmb-stat.service) 放到 `/etc/systemd/system/xdnmb-stat.service`，然后执行：
-
-```sh
+sudo chmod 755 /opt/xdnmb-stat/xdnmb-stat
 sudo systemctl daemon-reload
 sudo systemctl enable --now xdnmb-stat
+sudo systemctl status xdnmb-stat --no-pager
+curl -fsS http://127.0.0.1:18787/api/status
 ```
 
-默认设置 Go 运行时的 32 MiB 内存软目标，可通过 `GOMEMLIMIT` 覆盖。它会影响垃圾回收频率，**不是进程实际内存的硬上限**（[Go 官方说明](https://pkg.go.dev/runtime/debug#SetMemoryLimit)）；实际占用会随系统和访问量变化。上游响应限制为 2 MiB，只保留少量图片地址，最多同时处理 64 个页面请求。没有定时后台轮询，无访问时不会持续向 X 岛发请求。
+该 unit 自动创建持久目录 `/var/lib/xdnmb-stat` 并赋予动态服务用户写入权限。升级只替换程序和 unit，然后 `systemctl daemon-reload && systemctl restart xdnmb-stat`；**保留并备份数据目录**，否则历史会丢失。不要运行多个实例共同写同一目录。
 
-2026-11-16 本地 Windows amd64 实测：启动并访问页面后工作集约 9.02 MiB，取得真实近期样本后约 15.77 MiB；缓存命中约 2 ms。这是一次本机冒烟检查，不是 Linux 生产环境的内存保证或负载测试。详细记录保留在本地 `validation/smoke-memory.json`。
+服务只监听 `127.0.0.1:18787`，由 Nginx 提供公网 HTTPS。[Nginx 配置](deploy/status.kusotech.club.conf) 使用 `status.kusotech.club` 的证书；首次部署需要先配置 DNS、申请相应证书，再启用配置。不要开放内部端口；8787 留给服务器原有服务。
 
-目录按需更新并缓存 5 分钟，同时到来的请求复用一次更新；更新期间可立即返回未过期的旧目录，旧时间戳保持不变。更新失败时最多保留 15 分钟，过期返回 503。目录只含生成时间、CDN 地址和最多 3 个图片路径，不保存帖子正文或用户信息。样本服务不能访问 X 岛时，页面会报告覆盖不足，而不是把访问者的图床判为宕机。
+Certbot webroot 续期需保留 `/.well-known/acme-challenge/` 路由，并将 [证书续期重载脚本](deploy/renew-status-certificate.sh) 以执行权限安装到 `/etc/letsencrypt/renewal-hooks/deploy/xdnmb-stat-nginx-reload`。已有服务的 `listen.conf` 覆盖配置也必须使用 `127.0.0.1:18787`。
 
-也可以继续用 GitHub Pages 托管前端，并在 `index.html` 加载 `status-page.js` **之前**配置目录服务：
+可通过 systemd override 调整环境变量：
 
-```html
-<script>window.XDAO_SAMPLE_CATALOG = 'https://你的样本服务域名/image-samples.json';</script>
-```
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `XDAO_HOST` | `127.0.0.1` | 监听地址 |
+| `XDAO_PORT` | `18787` | 内部端口 |
+| `XDAO_INTERVAL_SECONDS` | `300` | 检测间隔，允许 60–3600 秒 |
+| `XDAO_DATA_DIR` | `data` | 直接运行时相对当前目录；unit 设为 `/var/lib/xdnmb-stat` |
+| `XDAO_PROBE_LOCATION` | `台湾 · Google Cloud` | 页面显示的探针位置，迁移服务器时同步修改 |
+| `GOMEMLIMIT` | `32MiB` | Go 内存软目标，并非进程内存硬上限 |
 
-样本接口允许公开跨域读取。没有目录服务且浏览器又无法读取帖子接口时，只能检测固定样本，页面会显示检测不完整。安装浏览器脚本后，如果能取得足够近期图片，也无需目录服务。
+只在内存中保留每日汇总、最近状态和有限事件，启动时逐行读取日志。API JSON 响应上限 2 MiB，图片流式校验，网页请求并发上限 32；不保存图片文件或帖子正文。磁盘占用取决于轮数与错误详情，原始日志会自动清理过期日期文件。
 
-## 验证
+## 本地开发与验证
 
-仅开发机器需要 Go 1.22+；前端回归检查使用 Node.js，两者都不需要安装到部署服务器。
+仅开发机器需要 Go 1.22+；可选的前端逻辑检查需要 Node.js：
 
 ```sh
 go test ./...
 go vet ./...
-node --test --test-isolation=none tests/status.test.cjs tests/page.test.cjs
+node --test --test-isolation=none tests/page.test.cjs
+go run .
 ```
 
-自行交叉编译 Linux 版本（在开发机器执行，构建时页面会一起嵌入）：
+本地访问 `http://127.0.0.1:18787`；首次启动立即开始后台探针，完成前显示等待首次检测。只读端点 `/api/status` 返回状态、每日汇总和异常事件；没有手动探测或通用代理端点。
+
+在开发机器交叉编译（以下为 Linux / macOS shell）：
 
 ```sh
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o xdnmb-stat .
 # ARM64 服务器将 GOARCH 改为 arm64
 ```
 
-覆盖 HTTP 错误、错误页、无效 JSON、跨域不可读、超时、近期图片筛选、缩略图与原图差异、部分失败、目录过期、并发限制、页面汇总及浏览器脚本请求桥接。浏览器脚本仍需在实际部署域名和所用脚本管理器中完成安装验证。
+测试覆盖真实格式校验、旧图成功但近期原图失败、未知状态聚合、日志损坏与写入失败、跨重启历史、保留期清理、故障恢复与监测中断、无人访问的定时执行，以及只读页面不会触发探针。

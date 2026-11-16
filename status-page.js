@@ -1,194 +1,112 @@
-const $ = id => document.getElementById(id);
-const C = XdaoStatus;
-const AUTO_INTERVAL = 300000, COOLDOWN = 30000;
-const HISTORY_MAX = 40, HISTORY_KEY = 'xdao-status-history-v2';
-const ROWS = [...C.APIS, { id: 'cdn', name: '图片 CDN' }, { id: 'notice', name: '公告接口' }];
-let running = false, lastRun = 0, cooldownTimer;
-let history = {};
-try {
-  const saved = JSON.parse(localStorage.getItem(HISTORY_KEY));
-  if (saved && typeof saved === 'object' && !Array.isArray(saved)) history = saved;
-} catch {}
-for (const row of ROWS) {
-  history[row.id] = Array.isArray(history[row.id])
-    ? history[row.id].filter(s => Object.hasOwn(C.STATE_TEXT, s)).slice(-HISTORY_MAX) : [];
-  const el = document.createElement('div');
-  el.className = 'row';
-  el.innerHTML = `<div class="row-top"><span class="dot wait" id="dot-${row.id}"></span>
-    <span class="name">${row.name}</span><span class="host">${row.origin ? new URL(row.origin).host : ''}</span>
-    <div class="result"><div class="state wait" id="state-${row.id}">等待检测</div></div></div>
-    <p class="detail" id="detail-${row.id}"></p><ul class="checks" id="checks-${row.id}"></ul>
-    <div class="ticks" id="ticks-${row.id}"></div>
-    <div class="tick-label"><span>较早</span><span>最近 ${HISTORY_MAX} 次检测</span></div>`;
-  $('list').appendChild(el);
-  renderTicks(row.id);
-}
-function renderTicks(id) {
-  const values = history[id];
-  $('ticks-' + id).replaceChildren(...Array.from({ length: HISTORY_MAX }, (_, k) => {
-    const tick = document.createElement('span');
-    const status = values[values.length - HISTORY_MAX + k];
-    tick.className = 'tick ' + (status || '');
-    tick.title = C.STATE_TEXT[status] || '尚无记录';
-    return tick;
-  }));
-}
-function paint(id, status, detail) {
-  $('dot-' + id).className = 'dot ' + status;
-  $('state-' + id).className = 'state ' + status;
-  $('state-' + id).textContent = C.STATE_TEXT[status] || '检测中';
-  $('detail-' + id).textContent = detail;
-}
-function record(id, status) {
-  history[id].push(status);
-  history[id] = history[id].slice(-HISTORY_MAX);
-  renderTicks(id);
-}
-function checkLine(id, label, result, url) {
-  const line = document.createElement('li');
-  line.className = 'check ' + result.status;
-  const name = document.createElement(url ? 'a' : 'span');
-  name.textContent = label;
-  if (url) { name.href = url; name.target = '_blank'; name.rel = 'noopener noreferrer'; }
-  const text = document.createElement('span');
-  text.textContent = `${C.STATE_TEXT[result.status]} · ${result.detail}${Number.isFinite(result.elapsed) ? ` · ${result.elapsed} ms` : ''}`;
-  line.append(name, text);
-  $('checks-' + id).appendChild(line);
-}
-function setBanner(cls, text) {
-  $('banner').className = cls;
-  $('banner-text').textContent = text;
-}
+(() => {
+  const labels = { operational: '运行正常', degraded: '响应异常', outage: '不可用', unknown: '暂无有效数据' };
+  const headlines = { operational: '所有监测项目运行正常', degraded: '部分监测项目出现异常', outage: '监测节点无法访问服务', unknown: '监测数据暂不完整' };
+  const time = (value, dateOnly = false) => value ? new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    ...(dateOnly ? {} : { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+  }).format(new Date(value)) : '尚无记录';
+  const percentage = value => typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : '—';
+  const dayDescription = day => `${day.date} · ${labels[day.status] || labels.unknown}；${day.checks} 轮记录：正常 ${day.ok}，部分异常 / 缓慢 ${day.slow}，失败 ${day.failed}，未知 ${day.unknown}；预计 ${day.expected} 轮`;
+  const historyRates = days => {
+    const sums = days.reduce((sum, day) => ({ ok: sum.ok + day.ok, known: sum.known + day.ok + day.slow + day.failed, checks: sum.checks + day.checks, expected: sum.expected + day.expected }), { ok: 0, known: 0, checks: 0, expected: 0 });
+    return { normal: sums.known ? sums.ok * 100 / sums.known : null, coverage: sums.expected ? Math.min(100, sums.checks * 100 / sums.expected) : null };
+  };
+  if (typeof module !== 'undefined') { module.exports = { labels, headlines, time, percentage, dayDescription, historyRates }; return; }
+  if (location.hostname === 'kakenhidesu.github.io') { location.replace('https://status.kusotech.club/'); return; }
+  const $ = id => document.getElementById(id);
+  const node = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; };
+  let data = null, period = 90, eventLimit = 10, loading = false, lastRendered = '';
 
-// This bridge uses requests made by the tester's own browser, never a server proxy.
-async function localBrowserFetcher() {
-  const channel = 'xdnmb-status-v1';
-  const pending = new Map();
-  const newId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const readyId = newId();
-  let ready;
-  const readyPromise = new Promise(resolve => { ready = resolve; });
-  const listener = event => {
-    if (event.source !== window || event.origin !== location.origin || event.data?.channel !== channel) return;
-    const message = event.data;
-    if (message.type === 'ready' && message.id === readyId) ready(true);
-    if (message.type !== 'response' || !pending.has(message.id)) return;
-    const request = pending.get(message.id);
-    if (message.error) request.reject(new Error(message.error));
-    else if (message.status >= 200 && message.status <= 599 && typeof message.body === 'string') {
-      request.resolve({ status: message.status, ok: message.status < 300, type: 'basic',
-        headers: new Headers({ 'Content-Type': message.contentType || '' }),
-        json: async () => JSON.parse(message.body) });
-    } else request.reject(new Error('Invalid browser script response'));
-  };
-  window.addEventListener('message', listener);
-  window.postMessage({ channel, type: 'hello', id: readyId }, location.origin);
-  const connected = await Promise.race([readyPromise, new Promise(resolve => setTimeout(() => resolve(false), 400))]);
-  if (!connected) { window.removeEventListener('message', listener); return null; }
-  return {
-    dispose: () => window.removeEventListener('message', listener),
-    fetcher: (url, options) => {
-      const id = newId();
-      let abort;
-      const promise = new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        abort = () => {
-          window.postMessage({ channel, type: 'abort', id }, location.origin);
-          reject(new Error('Request aborted'));
-        };
-        if (options.signal.aborted) { abort(); return; }
-        options.signal.addEventListener('abort', abort, { once: true });
-        window.postMessage({ channel, type: 'request', id, url }, location.origin);
+  function renderComponents() {
+    const expanded = new Set([...document.querySelectorAll('.probe-detail[open]')].map(el => el.dataset.id));
+    const groups = new Map();
+    const fragment = document.createDocumentFragment();
+    for (const component of data.components) {
+      let group = groups.get(component.group);
+      if (!group) { group = node('div', 'component-group'); group.append(node('h3', 'group-title', component.group)); groups.set(component.group, group); fragment.append(group); }
+      const row = node('article', 'component');
+      const heading = node('div', 'component-heading');
+      const name = node('div'); name.append(node('div', 'component-name', component.name), node('div', 'host', component.host));
+      heading.append(name, node('span', `state-label ${component.status}`, labels[component.status] || labels.unknown));
+      row.append(heading);
+      const bars = node('div', `bars period-${period}`); bars.setAttribute('role', 'group'); bars.setAttribute('aria-label', `${component.name} 最近 ${period} 天的记录`);
+      const detail = node('p', 'day-detail'); detail.hidden = true;
+      const history = component.history.slice(-period), rates = historyRates(history);
+      history.forEach((day, index) => {
+        const incomplete = day.checks > 0 && day.expected > day.checks * 1.05;
+        const bar = node('button', `day ${day.status}${incomplete ? ' incomplete' : ''}`);
+        bar.type = 'button'; bar.title = dayDescription(day); bar.setAttribute('aria-label', dayDescription(day)); bar.tabIndex = index === period - 1 ? 0 : -1;
+        bar.addEventListener('click', () => { detail.textContent = dayDescription(day); detail.hidden = false; });
+        bar.addEventListener('keydown', event => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault(); const children = [...bars.children], current = children.indexOf(bar);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? children.length - 1 : Math.max(0, Math.min(children.length - 1, current + (event.key === 'ArrowLeft' ? -1 : 1)));
+          bar.tabIndex = -1; children[next].tabIndex = 0; children[next].focus();
+        }); bars.append(bar);
       });
-      return promise.finally(() => { pending.delete(id); options.signal.removeEventListener('abort', abort); });
-    },
-  };
-}
-async function loadCatalog() {
-  // Optional metadata only. Its server-side success/failure is never a health result.
-  const url = new URL(window.XDAO_SAMPLE_CATALOG || './image-samples.json', location.href).href;
-  return C.checkJson(url, data => C.validateCatalog(data), { timeout: 22000 });
-}
-async function runAll() {
-  if (running || (lastRun && Date.now() - lastRun < COOLDOWN)) return;
-  running = true;
-  lastRun = Date.now();
-  clearTimeout(cooldownTimer);
-  $('btn').disabled = true;
-  $('hint').style.display = 'none';
-  setBanner('checking', '正在从你的浏览器检测…');
-  for (const row of ROWS) {
-    paint(row.id, 'wait', row.id === 'cdn' ? '正在获取当前图床地址和近期图片样本' : '');
-    $('checks-' + row.id).replaceChildren();
+      const caption = node('div', 'bar-caption');
+      caption.append(node('span', '', `${period} 天前`), node('span', 'uptime', `${percentage(rates.normal)} 已记录正常率`), node('span', '', '今天'));
+      const probeDetail = node('details', 'probe-detail'); probeDetail.dataset.id = component.id; probeDetail.open = expanded.has(component.id);
+      const summary = node('summary'); summary.append(node('span', '', component.latencyMs ? `最近响应 ${component.latencyMs.toLocaleString()} ms` : '最近一次检测'), node('span', 'expand', '+'));
+      probeDetail.append(summary, node('p', '', `${component.detail}。所选时段记录覆盖率 ${percentage(rates.coverage)}。`));
+      row.append(bars, caption, detail, probeDetail); group.append(row);
+    }
+    $('components').replaceChildren(fragment); $('components').setAttribute('aria-busy', 'false');
   }
-  let bridge;
-  try {
-    bridge = await localBrowserFetcher();
-    const options = bridge ? { fetcher: bridge.fetcher } : {};
-    $('method').textContent = bridge
-      ? '接口：通过浏览器脚本从你的网络验证；图片：由你的浏览器直接加载。'
-      : '接口：浏览器直接请求；受跨域限制时显示“无法验证”。图片：由你的浏览器直接加载。';
-    const catalogPromise = loadCatalog();
-    const noticePromise = C.checkJson(C.NOTICE_URL, C.validateNotice, options).then(result => {
-      paint('notice', result.status, result.detail);
-      return result;
-    });
-    const apis = await Promise.all(C.APIS.map(async api => {
-      const result = await C.checkApi(api, options);
-      paint(api.id, result.status, '分别验证 CDN 配置与帖子列表的 HTTP 状态、JSON 和内容格式');
-      checkLine(api.id, 'CDN 配置', result.config);
-      checkLine(api.id, '帖子列表', result.posts);
-      return result;
-    }));
-    const catalog = await catalogPromise;
-    const plan = C.imagePlan(apis, Date.now(), catalog.data);
-    let completed = 0;
-    const images = await C.mapLimit(plan.checks, 4, async item => {
-      const result = await C.checkImage(item.url);
-      paint('cdn', 'wait', `已检测 ${++completed}/${plan.checks.length} 项；近期图片 ${plan.recentCount}/${C.RECENT_COUNT} 张`);
-      checkLine('cdn', `${item.label} · ${new URL(item.url).host} · ${item.path}`, result, item.url);
-      return result;
-    });
-    const cdn = C.imageSummary(plan, images);
-    const source = plan.catalogUsed ? `；样本目录更新于 ${new Date(plan.catalogTime).toLocaleTimeString()}，加载结果来自你的浏览器` : '';
-    paint('cdn', cdn.status, `${cdn.passed}/${cdn.total} 项加载成功；近期图片 ${plan.recentCount}/${C.RECENT_COUNT} 张${source}`);
-    for (const issue of plan.coverage) checkLine('cdn', '覆盖范围', { status: 'unknown', detail: issue });
-    const notice = await noticePromise;
-    const results = [...apis, { ...cdn, id: 'cdn' }, { ...notice, id: 'notice' }];
-    const summary = C.banner(results);
-    setBanner(summary.cls, summary.text);
-    for (const result of results) record(result.id, result.status);
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch {}
-    const hints = ['结果仅代表你当前网络下的本轮抽样，不能保证所有图片、上传功能或所有地区均正常。'];
-    if (results.some(x => x.status === 'bad' || x.status === 'partial')) {
-      hints.push('加载失败可能与服务故障、文件失效、限流、网络或浏览器拦截有关；本页面不能据此确定具体原因。');
+
+  function renderIncidents() {
+    const events = data.incidents || [];
+    $('history-count').textContent = events.length ? `最近 ${events.length} 条事件记录` : '自动记录异常与恢复';
+    const fragment = document.createDocumentFragment();
+    if (!events.length) { const empty = node('div', 'empty', '暂无已记录的异常事件'); empty.append(node('span', '', '历史从监测启用后开始积累，不补填此前的状态。')); fragment.append(empty); }
+    for (const event of events.slice(0, eventLimit)) {
+      const row = node('article', 'incident'), when = node('div', 'incident-time', time(event.startedAt, true));
+      when.append(node('span', '', time(event.startedAt).split(' ').at(-1)));
+      const body = node('div'), top = node('div', 'incident-top');
+      const state = { active: data.stale || data.storageError ? '等待更新' : '持续中', resolved: '已恢复', interrupted: '记录中断' }[event.status] || '未知';
+      top.append(node('h3', '', `${event.componentName} · ${event.severity === 'outage' ? '访问失败' : '响应异常'}`), node('span', `badge ${event.status}`, state));
+      body.append(top, node('p', '', event.detail));
+      if (event.endedAt) body.append(node('p', 'resolution', `${event.status === 'resolved' ? '恢复于' : '最后确认异常于'} ${time(event.endedAt)}`));
+      row.append(when, body); fragment.append(row);
     }
-    if (apis.some(x => x.status === 'unknown') || notice.status === 'unknown') {
-      hints.push('接口无法读取不等于接口正常或宕机。可安装下方可选浏览器脚本，在你自己的网络上验证真实响应。');
-    }
-    if (plan.coverage.length) hints.push('图片覆盖不足，固定旧图通过也不会得到完整通过的结论。');
-    $('hint').textContent = hints.join('\n');
-    $('hint').style.display = 'block';
-  } catch (error) {
-    setBanner('partial', '检测未完成，请重试');
-    $('hint').textContent = '本轮检测发生异常，不能据此判断服务正常。';
-    $('hint').style.display = 'block';
-    for (const row of ROWS) {
-      if ($('state-' + row.id).classList.contains('wait')) paint(row.id, 'unknown', '本轮检测未完成');
-    }
-    console.error('Status check failed', error);
-  } finally {
-    bridge?.dispose();
-    running = false;
-    $('time').textContent = new Date().toLocaleTimeString();
-    const remaining = Math.max(0, COOLDOWN - (Date.now() - lastRun));
-    $('btn').textContent = remaining ? '请稍候再检测' : '重新检测';
-    cooldownTimer = setTimeout(() => { $('btn').disabled = false; $('btn').textContent = '重新检测'; }, remaining);
+    $('incidents').replaceChildren(fragment); $('more-incidents').hidden = events.length <= eventLimit;
   }
-}
-$('btn').addEventListener('click', runAll);
-runAll();
-setInterval(() => { if (!document.hidden) runAll(); }, AUTO_INTERVAL);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && Date.now() - lastRun >= AUTO_INTERVAL) runAll();
-});
+
+  function render() {
+    const state = data.overall;
+    $('headline').textContent = data.storageError ? '监测记录暂时无法保存' : data.stale ? (data.checkedAt ? '监测记录等待更新' : '等待首次定期检测') : headlines[state] || headlines.unknown;
+    $('hero-icon').className = `hero-icon ${state}`; $('hero-icon').textContent = { operational: '✓', degraded: '!', outage: '×', unknown: '·' }[state] || '·';
+    $('summary').textContent = state === 'operational' ? '最近一轮探针未发现异常，所有监测项目均已通过检查。' : state === 'degraded' || state === 'outage' ? '后台探针记录到响应异常，受影响的组件及事件记录见下方。' : '暂无完整、及时的监测结果；未知区间不会被算作正常。';
+    $('probe-location').textContent = `${data.location} · 每 ${data.intervalSeconds / 60} 分钟检测`;
+    $('last-updated').textContent = `最后检测 ${time(data.checkedAt)}`;
+    $('interval-label').textContent = '页面每分钟同步记录';
+    $('record-start').textContent = `最早保留记录：${time(data.monitoringSince)} · 保存最近 ${data.retentionDays} 天`;
+    $('load-warning').hidden = !data.historyWarning; $('load-warning').textContent = data.historyWarning ? '部分历史记录无法读取，对应空缺不计作正常。' : '';
+    renderComponents(); renderIncidents();
+  }
+  async function load() {
+    if (loading) return; loading = true;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await fetch('/api/status', { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const next = await response.json();
+      if (!Array.isArray(next.components) || !next.components.length || !Array.isArray(next.incidents)) throw new Error('Invalid status data');
+      data = next;
+      const key = JSON.stringify([data.checkedAt, data.overall, data.stale, data.storageError, data.historyWarning]);
+      if (key !== lastRendered || !$('load-warning').hidden) { render(); lastRendered = key; }
+    } catch {
+      $('headline').textContent = '暂时无法读取监测记录'; $('hero-icon').className = 'hero-icon unknown'; $('hero-icon').textContent = '·';
+      $('summary').textContent = '状态页与监测服务器的连接暂不可用，不能据此判断 X 岛服务状态。';
+      $('load-warning').hidden = false; $('load-warning').textContent = data ? `以下为最后一次取得的记录（${time(data.checkedAt)}），页面会自动重试。` : '页面会自动重试，无需手动发起检测。';
+    } finally { clearTimeout(timer); loading = false; }
+  }
+  document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => {
+    period = Number(button.dataset.period);
+    document.querySelectorAll('[data-period]').forEach(item => { const selected = item === button; item.classList.toggle('selected', selected); item.setAttribute('aria-pressed', String(selected)); });
+    if (data) renderComponents();
+  }));
+  $('more-incidents').addEventListener('click', () => { eventLimit += 10; if (data) renderIncidents(); });
+  load(); setInterval(() => { if (!document.hidden) load(); }, 60000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+})();

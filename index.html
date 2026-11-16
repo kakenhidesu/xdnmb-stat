@@ -1,132 +1,46 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>xdnmb status</title>
-<style>
-:root {
-  --bg: #F0EEE6;
-  --card: #FFFFFF;
-  --text: #191919;
-  --sub: #73726c;
-  --line: #E5E3DA;
-  --ok: #24A148;  --ok-bg: var(--ok);
-  --bad: #DA3633; --bad-bg: var(--bad);
-  --slow: #D9A511; --slow-bg: var(--slow);
-  --wait: #B8B6AE; --wait-bg: #8A8880;
-  --accent: #D97757;
-  --tick: #E9E7DF;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1F1E1B; --card: #262624; --text: #ECEAE4; --sub: #9C9A92;
-    --line: #38362F;
-    --ok: #3FB950; --bad: #F85149; --slow: #E3B341; --wait: #6E6C64;
-    --ok-bg: #238636; --bad-bg: #C93C37; --slow-bg: #B08800; --wait-bg: #57554E;
-    --tick: #33322C;
-  }
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  background: var(--bg); color: var(--text);
-  font: 15px/1.6 "Styrene B", "Styrene A", ui-sans-serif, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  max-width: 720px; margin: 0 auto; padding: 40px 20px 64px;
-}
-h1 { font-family: "Copernicus", "Tiempos Headline", Georgia, "Songti SC", serif; font-weight: 600; font-size: 24px; letter-spacing: .2px; margin-bottom: 16px; }
-.notice { font-weight: 700; font-size: 14px; margin-bottom: 20px; }
-#banner {
-  border-radius: 14px; padding: 18px 22px; margin-bottom: 28px;
-  color: #fff; font-size: 18px; font-weight: 600;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  background: var(--wait-bg); transition: background .4s;
-}
-#banner .when { font-size: 13px; font-weight: 400; opacity: .85; flex: none; }
-#banner.checking { animation: breathe 1.2s infinite alternate; }
-@keyframes breathe { from { opacity: .75 } to { opacity: 1 } }
-#banner.ok { background: var(--ok-bg); }
-#banner.partial { background: var(--slow-bg); }
-#banner.down { background: var(--bad-bg); }
-.group-title { font-size: 13px; color: var(--sub); margin: 0 2px 8px; text-transform: uppercase; letter-spacing: .6px; }
-#list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-.row { padding: 16px 20px 14px; }
-.row + .row { border-top: 1px solid var(--line); }
-.row-top { display: flex; align-items: center; gap: 10px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--wait); }
-.dot.wait { animation: breathe 1s infinite alternate; }
-.name { font-weight: 600; font-size: 15px; }
-.host { color: var(--sub); font-size: 12px; font-family: Consolas, "Cascadia Mono", "SF Mono", Menlo, monospace; margin-left: 2px; }
-.result { margin-left: auto; text-align: right; flex: none; }
-.state { font-size: 13px; font-weight: 600; }
-.state.ok { color: var(--ok); } .state.bad { color: var(--bad); }
-.state.slow { color: var(--slow); } .state.wait { color: var(--sub); font-weight: 400; }
-.ms { color: var(--sub); font-size: 12px; }
-.ticks { display: flex; gap: 3px; margin-top: 10px; }
-.tick { flex: 1; height: 26px; border-radius: 2px; background: var(--tick); min-width: 3px; }
-.dot.ok, .tick.ok { background: var(--ok); }
-.dot.bad, .tick.bad { background: var(--bad); }
-.dot.slow, .tick.slow { background: var(--slow); }
-.tick-label { display: flex; justify-content: space-between; color: var(--sub); font-size: 11px; margin-top: 5px; }
-button {
-  display: block; width: 100%; margin-top: 24px; padding: 13px;
-  border: none; border-radius: 999px; background: var(--accent); color: #fff;
-  font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit;
-}
-button:hover { filter: brightness(1.06); }
-button:disabled { opacity: .5; cursor: default; }
-#hint { display: none; margin-top: 20px; padding: 14px 18px; border-radius: 14px;
-  background: var(--card); border: 1px solid var(--line); font-size: 13px; color: var(--sub); line-height: 1.8; }
-#hint b { color: var(--text); }
-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line);
-  color: var(--sub); font-size: 12px; text-align: center; }
-.explanation { color: var(--sub); font-size: 13px; margin-bottom: 16px; }
-.detail { color: var(--sub); font-size: 12px; margin-top: 8px; overflow-wrap: anywhere; }
-.checks { list-style: none; margin-top: 8px; }
-.check { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
-.check + .check { border-top: 1px dashed var(--line); }
-.check > span:last-child { color: var(--sub); }
-.check.bad > span:last-child { color: var(--bad); }
-.check.unknown > span:last-child { color: var(--slow); }
-a { color: inherit; text-underline-offset: 3px; }
-.state.partial, .state.unknown { color: var(--slow); }
-.dot.partial, .tick.partial, .dot.unknown, .tick.unknown { background: var(--slow); }
-.tick.unknown { background: repeating-linear-gradient(135deg, var(--slow) 0 3px, var(--tick) 3px 6px); }
-#hint { white-space: pre-line; }
-.help { margin-top: 20px; font-size: 13px; color: var(--sub); }
-.help summary { cursor: pointer; color: var(--text); }
-.help p { margin-top: 8px; }
-@media (max-width: 520px) {
-  body { padding: 24px 12px 40px; }
-  .row { padding: 14px; }
-  .row-top { flex-wrap: wrap; gap: 6px; }
-  .host { order: 4; width: 100%; margin-left: 15px; }
-  .host:empty { display: none; }
-  #banner { flex-wrap: wrap; font-size: 16px; padding: 16px; }
-}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="X 岛服务状态、90 天可用性记录与自动故障事件。由服务器定期监测，无需手动测试。">
+  <title>X 岛服务状态</title>
+  <link rel="stylesheet" href="status.css">
+  <script defer src="status-page.js"></script>
 </head>
 <body>
+  <div class="page">
+    <header class="header">
+      <a class="brand" href="/" aria-label="X 岛状态页首页"><span class="brand-mark">X</span><span>X 岛<span class="brand-label">STATUS</span></span></a>
+      <nav aria-label="页面导航"><a href="#history">历史事件 <span aria-hidden="true">↗</span></a><a href="https://github.com/kakenhidesu/xdnmb-stat" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a></nav>
+    </header>
 
-<h1>xdnmb status</h1>
+    <main>
+      <section class="hero" aria-labelledby="headline">
+        <div class="eyebrow"><span class="live-dot"></span> 服务运行状态</div>
+        <div class="headline-row"><span id="hero-icon" class="hero-icon unknown" aria-hidden="true">·</span><h1 id="headline">正在读取监测记录</h1></div>
+        <p id="summary" class="hero-description">后台探针定期运行，此页面展示已记录的结果。</p>
+        <div class="meta"><span id="probe-location">服务器监测节点</span><span class="meta-dot">·</span><span id="last-updated">等待最新记录</span></div>
+        <p id="load-warning" class="notice" hidden></p>
+      </section>
 
-<p class="notice">从你的浏览器检测访问情况，每 5 分钟自动更新。频繁检测可能触发限流。</p>
-<p id="method" class="explanation"></p>
+      <section aria-labelledby="system-title" class="system-section">
+        <div class="section-heading"><h2 id="system-title">服务状态</h2><div class="period-switch" role="group" aria-label="历史展示范围"><button type="button" data-period="30" aria-pressed="false">30 天</button><button type="button" data-period="90" aria-pressed="true" class="selected">90 天</button></div></div>
+        <div class="section-caption"><span>每个色块代表一天的记录</span><span id="interval-label">自动监测</span></div>
+        <div id="components" class="components" aria-busy="true"><div class="loading-card">正在载入服务状态…</div></div>
+        <div class="legend" aria-label="历史状态图例"><span><i class="operational"></i>正常</span><span><i class="degraded"></i>响应异常</span><span><i class="outage"></i>不可用</span><span><i class="unknown"></i>无记录 / 未知</span><span><i class="incomplete"></i>记录不完整</span></div>
+        <p class="footnote">正常率按可判定的记录计算，缓慢和失败计入异常；灰色区间不计作正常。点击色块可查看当天记录。</p>
+      </section>
 
-<div id="banner" class="checking" role="status" aria-live="polite"><span id="banner-text">正在检测…</span><span class="when" id="time"></span></div>
+      <section id="history" class="history-section" aria-labelledby="history-title">
+        <div class="section-heading"><h2 id="history-title">历史事件</h2><span id="history-count" class="subtle">自动记录异常与恢复</span></div>
+        <div id="incidents" class="incidents"><div class="empty">正在读取事件记录…</div></div>
+        <button id="more-incidents" class="more" type="button" hidden>查看更多事件</button>
+      </section>
+    </main>
 
-<p class="group-title">服务组件</p>
-<div id="list"></div>
-
-<button id="btn">重新检测</button>
-<div id="hint"></div>
-
-<details class="help"><summary>接口显示“无法验证”怎么办？</summary>
-<p>X 岛接口可能不允许网页跨域读取。你可以在 Tampermonkey 等用户脚本管理器中安装<a href="local-probe.user.js">本地接口检测脚本</a>，然后刷新页面。脚本只访问这里列出的公开接口，不携带账号 Cookie。</p>
-<p>服务器仅提供近期图片地址；接口与图片的健康状态始终来自你的浏览器，不使用服务器到 X 岛的连通性作为结果。</p></details>
-<footer>检测历史仅保存在本机。图片与接口请求会发送给 X 岛相关服务；使用样本服务时，也会向它请求图片目录。</footer>
-
-<script src="status-core.js"></script>
-<script src="status-page.js"></script>
+    <footer><div><span class="footer-brand">X 岛服务状态</span><span>非官方监测 · 北京时间（UTC+8）</span></div><p id="scope-note">结果来自单个服务器监测节点，不代表所有地区或每位用户的连接情况。图片采用抽样检测，不包含上传功能。</p><p id="record-start" class="record-start"></p></footer>
+  </div>
 </body>
 </html>

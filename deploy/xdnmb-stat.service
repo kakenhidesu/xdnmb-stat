@@ -1,5 +1,5 @@
 [Unit]
-Description=Xdao status image sample catalogue
+Description=Xdao scheduled status monitor
 After=network-online.target
 Wants=network-online.target
 
@@ -10,6 +10,10 @@ DynamicUser=yes
 Environment=XDAO_HOST=127.0.0.1
 Environment=XDAO_PORT=18787
 Environment=GOMEMLIMIT=32MiB
+Environment=XDAO_INTERVAL_SECONDS=300
+Environment=XDAO_DATA_DIR=/var/lib/xdnmb-stat
+StateDirectory=xdnmb-stat
+StateDirectoryMode=0750
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
