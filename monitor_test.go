@@ -124,7 +124,7 @@ func TestJournalSurvivesRestartAndBuildsIncidents(t *testing.T) {
 		t.Fatal("component id missing from JSON")
 	}
 }
-func TestUnknownAndUnobservedHistoryAreNotGreen(t *testing.T) {
+func TestCurrentUnknownAndUnobservedHistoryStayUnknown(t *testing.T) {
 	store := testStore(t)
 	empty := store.view(testNow)
 	if empty.Overall != unknown || !empty.Stale || empty.Components[0].Uptime != nil {
@@ -140,8 +140,49 @@ func TestUnknownAndUnobservedHistoryAreNotGreen(t *testing.T) {
 	if *view.Components[0].Uptime != 100 {
 		t.Fatal("unknown should be excluded, with coverage shown separately")
 	}
+	day := view.Components[0].History[89]
+	if day.Status != operational || day.OK != 1 || day.Unknown != 1 {
+		t.Fatal("daily summary lost confirmed evidence or its unknown counter")
+	}
 	if got := store.view(testNow.Add(20 * time.Minute)); !got.Stale || got.Components[0].Status != unknown {
 		t.Fatal("stale data looks healthy")
+	}
+}
+func TestDailySummaryPreservesConfirmedEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		day  dayStats
+		want string
+	}{
+		{"reported thumbnail day", dayStats{Checks: 288, OK: 274, Slow: 1, Unknown: 13}, slow},
+		{"known success and unknown", dayStats{Checks: 288, OK: 265, Unknown: 23}, operational},
+		{"only unknown", dayStats{Checks: 288, Unknown: 288}, unknown},
+		{"no samples", dayStats{}, unknown},
+		{"failure remains visible", dayStats{Checks: 288, OK: 274, Failed: 1, Unknown: 13}, degraded},
+		{"partial failures remain visible", dayStats{Checks: 288, OK: 274, Degraded: 1, Unknown: 13}, degraded},
+		{"all failed", dayStats{Checks: 288, Failed: 288}, outage},
+		{"missing samples", dayStats{Checks: 1, OK: 1}, operational},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := testStore(t)
+			start := time.Date(2026, 11, 17, 0, 0, 0, 0, displayZone)
+			date := start.Format("2006-01-02")
+			store.first = start.UnixMilli()
+			saved := tc.day
+			saved.Date = date
+			original := saved
+			store.days[date] = map[string]*dayStats{componentDefs[3].ID: &saved}
+			view := store.view(start.Add(24 * time.Hour))
+			got := view.Components[3].History[88]
+			want := original
+			want.Status, want.Expected = tc.want, 288
+			if got != want {
+				t.Fatalf("got %+v, want %+v", got, want)
+			}
+			if saved != original {
+				t.Fatal("building a daily view mutated stored counters")
+			}
+		})
 	}
 }
 func TestGapDoesNotInventRecovery(t *testing.T) {
@@ -271,7 +312,7 @@ func TestHTTPReadsDoNotProbeOrWrite(t *testing.T) {
 			t.Errorf("route %s exposed", route)
 		}
 	}
-	for _, route := range []string{"/", "/api/status", "/status.css", "/status-page.js", "/assets/fonts/fonts.css", "/assets/fonts/nmb-gothic-ui-v1.woff2"} {
+	for _, route := range []string{"/", "/api/status", "/status.css", "/status-page.js", "/assets/fonts/fonts.css", "/assets/fonts/nmb-gothic-ui-v2.woff2"} {
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, httptest.NewRequest("HEAD", route, nil))
 		if w.Code != 200 || w.Body.Len() != 0 {
@@ -279,7 +320,7 @@ func TestHTTPReadsDoNotProbeOrWrite(t *testing.T) {
 		}
 	}
 	font := httptest.NewRecorder()
-	handler.ServeHTTP(font, httptest.NewRequest("GET", "/assets/fonts/nmb-gothic-ui-v1.woff2", nil))
+	handler.ServeHTTP(font, httptest.NewRequest("GET", "/assets/fonts/nmb-gothic-ui-v2.woff2", nil))
 	if font.Code != 200 || font.Header().Get("Content-Type") != "font/woff2" || !strings.HasPrefix(font.Body.String(), "wOF2") {
 		t.Fatal("web font was not served as WOFF2")
 	}

@@ -354,14 +354,14 @@ func (s *monitorStore) view(now time.Time) statusView {
 				day.Expected = max(day.Checks, int((end.Sub(start)+s.interval-1)/s.interval))
 			}
 			switch {
-			case day.Checks == 0:
+			// Unknown samples must not erase confirmed results for the whole day.
+			// Preserve their counters so the UI can mark incomplete evidence.
+			case day.OK+day.Slow+day.Degraded+day.Failed == 0:
 				day.Status = unknown
 			case day.Failed == day.Checks:
 				day.Status = outage
 			case day.Failed > 0 || day.Degraded > 0:
 				day.Status = degraded
-			case day.Unknown > 0:
-				day.Status = unknown
 			case day.Slow > 0:
 				day.Status = slow
 			default:

@@ -6,12 +6,14 @@
     ...(dateOnly ? {} : { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
   }).format(new Date(value)) : '尚无记录';
   const percentage = value => typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : '—';
-  const dayDescription = day => `${day.date} · ${labels[day.status] || labels.unknown}；${day.checks} 轮记录：正常 ${day.ok}，较慢但可用 ${day.slow}，部分失败 ${day.degraded || 0}，失败 ${day.failed}，未知 ${day.unknown}；预计 ${day.expected} 轮`;
+  const dayIncomplete = day => day.status !== 'unknown' && (day.unknown > 0 || day.expected > day.checks);
+  const dayClassName = day => `day ${day.status}${dayIncomplete(day) ? ' incomplete' : ''}`;
+  const dayDescription = day => `${day.date} · ${day.checks ? labels[day.status] || labels.unknown : '无记录'}${dayIncomplete(day) ? '（含未知或缺测）' : ''}；${day.checks} 轮记录：正常 ${day.ok}，较慢但可用 ${day.slow}，部分失败 ${day.degraded || 0}，失败 ${day.failed}，未知 ${day.unknown}；预计 ${day.expected} 轮${day.expected > day.checks ? `，缺测 ${day.expected - day.checks} 轮` : ''}`;
   const historyRates = days => {
     const sums = days.reduce((sum, day) => ({ available: sum.available + day.ok + day.slow, known: sum.known + day.ok + day.slow + (day.degraded || 0) + day.failed, checks: sum.checks + day.checks, expected: sum.expected + day.expected }), { available: 0, known: 0, checks: 0, expected: 0 });
     return { availability: sums.known ? sums.available * 100 / sums.known : null, coverage: sums.expected ? Math.min(100, sums.checks * 100 / sums.expected) : null };
   };
-  if (typeof module !== 'undefined') { module.exports = { labels, headlines, time, percentage, dayDescription, historyRates }; return; }
+  if (typeof module !== 'undefined') { module.exports = { labels, headlines, time, percentage, dayDescription, dayClassName, historyRates }; return; }
   if (location.hostname === 'kakenhidesu.github.io') { location.replace('https://status.kusotech.club/'); return; }
   const $ = id => document.getElementById(id);
   const node = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; };
@@ -34,8 +36,7 @@
       const detail = node('p', 'day-detail'); detail.hidden = true;
       const history = component.history.slice(-period), rates = historyRates(history);
       history.forEach((day, index) => {
-        const incomplete = day.checks > 0 && day.expected > day.checks * 1.05;
-        const bar = node('button', `day ${day.status}${incomplete ? ' incomplete' : ''}`);
+        const bar = node('button', dayClassName(day));
         bar.type = 'button'; bar.title = dayDescription(day); bar.setAttribute('aria-label', dayDescription(day)); bar.tabIndex = index === period - 1 ? 0 : -1;
         bar.addEventListener('click', () => { detail.textContent = dayDescription(day); detail.hidden = false; });
         bar.addEventListener('keydown', event => {

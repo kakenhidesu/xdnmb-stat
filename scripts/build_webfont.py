@@ -43,13 +43,13 @@ for name, points in [('ui', common)]:
         worker.populate(unicodes=points)
         worker.subset(font)
         for record in font['name'].names:
-            value = {1: 'Nmb Gothic', 2: 'Regular', 3: f'Nmb Gothic v1 {name}',
+            value = {1: 'Nmb Gothic', 2: 'Regular', 3: f'Nmb Gothic v2 {name}',
                      4: 'Nmb Gothic Regular', 6: 'NmbGothic-Regular',
                      16: 'Nmb Gothic', 17: 'Regular'}.get(record.nameID)
             if value:
                 record.string = value.encode(record.getEncoding())
         font.flavor = 'woff2'
-        filename = f'nmb-gothic-{name}-v1.woff2'
+        filename = f'nmb-gothic-{name}-v2.woff2'
         font.save(OUT / filename)
     rules.append('@font-face{font-family:"Nmb Gothic";font-style:normal;font-weight:400;'
                  f'font-display:swap;src:url("{filename}") format("woff2");'
